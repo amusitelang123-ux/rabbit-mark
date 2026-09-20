@@ -6,6 +6,7 @@ import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
 import ProductCard from '@/components/ProductCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import AddressFormModal from '@/components/AddressFormModal.vue'
 import { formatMoney } from '@/utils/money'
 
 const user = useUserStore()
@@ -23,6 +24,7 @@ const menus: { key: Tab; label: string; icon: string }[] = [
 ]
 
 const addresses = ref<Address[]>([])
+const showAddressModal = ref(false)
 const coupons = ref<Coupon[]>([])
 const favorites = ref<Product[]>([])
 const footprints = ref<Product[]>([])
@@ -115,6 +117,11 @@ async function saveProfile() {
   }
 }
 
+async function onAddressCreated() {
+  addresses.value = await addressApi.list()
+  ui.toast('收货地址添加成功')
+}
+
 function couponLabel(c: Coupon): string {
   return c.type === 1 ? `¥${c.amount}` : `${(c.discountRate * 10).toFixed(1)}折`
 }
@@ -196,9 +203,9 @@ function couponLabel(c: Coupon): string {
           <template v-else-if="active === 'address'">
             <div class="uc__head">
               <h1 class="uc__title">收货地址</h1>
-              <button class="btn btn-secondary btn-sm" @click="ui.toast('新增地址（演示）', 'info')">＋ 新增地址</button>
+              <button class="btn btn-secondary btn-sm" @click="showAddressModal = true">＋ 新增地址</button>
             </div>
-            <div class="uc-addr-grid">
+            <div v-if="addresses.length" class="uc-addr-grid">
               <div v-for="a in addresses" :key="a.id" class="uc-addr">
                 <div class="uc-addr__head">
                   <b>{{ a.receiver }}</b>
@@ -212,6 +219,9 @@ function couponLabel(c: Coupon): string {
                 </div>
               </div>
             </div>
+            <EmptyState v-else icon="📍" title="还没有收货地址" desc="添加地址后，下单时即可快速选择">
+              <button class="btn btn-primary" @click="showAddressModal = true">＋ 新增地址</button>
+            </EmptyState>
           </template>
 
           <!-- Coupons -->
@@ -260,6 +270,8 @@ function couponLabel(c: Coupon): string {
         </section>
       </div>
     </div>
+
+    <AddressFormModal v-model="showAddressModal" @created="onAddressCreated" />
   </div>
 </template>
 
