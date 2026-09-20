@@ -188,6 +188,8 @@ export interface UserInfo {
   nickname: string
   avatar: string
   phone: string
+  gender: number
+  birthday: string
   levelName: string
   points: number
   totalSpent: number

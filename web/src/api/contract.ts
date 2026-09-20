@@ -115,6 +115,7 @@ export interface ClientApi {
     register(payload: RegisterPayload): Promise<LoginResult>
     profile(): Promise<UserInfo>
     updateProfile(patch: ProfilePatch): Promise<UserInfo>
+    uploadAvatar(file: File): Promise<UserInfo>
     favorites(): Promise<Product[]>
     toggleFavorite(productId: number): Promise<{ favorited: boolean }>
     footprints(): Promise<Product[]>

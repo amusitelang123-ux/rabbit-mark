@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express'
 import { z } from 'zod'
 import { asyncHandler } from '../../middlewares/asyncHandler'
+import { toUploadUrl } from '../../middlewares/upload'
 import { sendOk } from '../../utils/response'
+import { AppError } from '../../utils/errors'
 import * as userService from '../../services/userService'
 import { toInt } from '../../utils/helpers'
 
@@ -29,6 +31,12 @@ export const profile = asyncHandler(async (req: Request, res: Response) => {
 export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
   const input = profileSchema.parse(req.body)
   sendOk(res, await userService.updateProfile(req.auth!.uid, input), '资料已更新')
+})
+
+export const uploadAvatar = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.file) throw new AppError('请选择要上传的图片')
+  const url = toUploadUrl('avatars', req.file.filename)
+  sendOk(res, await userService.updateAvatar(req.auth!.uid, url), '头像已更新')
 })
 
 export const addresses = asyncHandler(async (req: Request, res: Response) => {

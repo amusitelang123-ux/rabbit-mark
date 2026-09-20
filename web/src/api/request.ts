@@ -28,14 +28,15 @@ function authHeaders(): Record<string, string> {
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { params, body, headers, ...rest } = options
+  const isFormData = body instanceof FormData
   const res = await fetch(buildUrl(path, params), {
     ...rest,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...authHeaders(),
       ...headers,
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined || isFormData ? (body as BodyInit | undefined) : JSON.stringify(body),
   })
 
   if (res.status === 401) {
@@ -53,4 +54,9 @@ export const http = {
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
   delete: <T>(path: string, body?: unknown) => request<T>(path, { method: 'DELETE', body }),
+  upload: <T>(path: string, file: File, field = 'file') => {
+    const form = new FormData()
+    form.append(field, file)
+    return request<T>(path, { method: 'POST', body: form })
+  },
 }

@@ -123,6 +123,8 @@ export function toUserDto(user: User & { level?: { name: string } | null }) {
     nickname: user.nickname ?? user.username ?? '小兔用户',
     avatar: user.avatar ?? '',
     phone: maskPhone(user.phone),
+    gender: user.gender ?? 0,
+    birthday: user.birthday ?? '',
     levelName: user.level?.name ?? '普通会员',
     points: user.points,
     totalSpent: num(user.totalSpent),

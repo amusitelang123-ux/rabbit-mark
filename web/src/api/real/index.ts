@@ -83,6 +83,7 @@ export const realApi: ClientApi = {
     register: (payload: RegisterPayload) => http.post<LoginResult>('/auth/register', payload),
     profile: () => http.get<UserInfo>('/user/profile'),
     updateProfile: (patch: ProfilePatch) => http.put<UserInfo>('/user/profile', patch),
+    uploadAvatar: (file: File) => http.upload<UserInfo>('/user/avatar', file),
     favorites: () => http.get<Product[]>('/user/favorites'),
     toggleFavorite: (productId) => http.post<{ favorited: boolean }>('/user/favorites/toggle', { productId }),
     footprints: () => http.get<Product[]>('/user/footprints'),

@@ -186,6 +186,10 @@ export const mockApi: ClientApi = {
       delay({ user: demoUser, token: 'mock-token', refreshToken: 'mock-refresh' }),
     profile: () => delay(demoUser),
     updateProfile: (patch: ProfilePatch) => delay({ ...demoUser, ...patch }),
+    uploadAvatar: (file: File) => {
+      demoUser.avatar = URL.createObjectURL(file)
+      return delay({ ...demoUser })
+    },
     favorites: () => delay(mockProducts.slice(0, 4)),
     toggleFavorite: () => delay({ favorited: true }),
     footprints: () => delay(mockProducts.slice(4, 8)),
