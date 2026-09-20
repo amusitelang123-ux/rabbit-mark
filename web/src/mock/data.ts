@@ -286,6 +286,8 @@ export const demoUser: UserInfo = {
   nickname: '小兔爱吃萝卜',
   avatar: avatar('小兔'),
   phone: '138****8888',
+  gender: 2,
+  birthday: '1998-06-15',
   levelName: '黄金会员',
   points: 2860,
   totalSpent: 6823.5,

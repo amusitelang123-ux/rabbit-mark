@@ -101,6 +101,13 @@ export async function updateProfile(
   return toUserDto(user as unknown as Parameters<typeof toUserDto>[0])
 }
 
+export async function updateAvatar(userId: number, avatarUrl: string) {
+  const user = await loadUser(userId)
+  user.avatar = avatarUrl
+  await user.save()
+  return toUserDto(user as unknown as Parameters<typeof toUserDto>[0])
+}
+
 /* --------------------------------- Address -------------------------------- */
 
 export async function listAddresses(userId: number) {

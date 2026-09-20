@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express'
+import { MulterError } from 'multer'
 import { ZodError } from 'zod'
 import { AppError } from '../utils/errors'
 import { fail } from '../utils/response'
@@ -23,6 +24,12 @@ export function errorHandler(
   if (err instanceof ZodError) {
     const first = err.errors[0]
     res.status(400).json(fail(ERR.PARAM, first?.message ?? '参数校验失败'))
+    return
+  }
+
+  if (err instanceof MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE' ? '图片大小不能超过 2MB' : '文件上传失败'
+    res.status(400).json(fail(ERR.PARAM, message))
     return
   }
 

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { optionalAuth, requireAuth } from '../../middlewares/auth'
+import { avatarUpload } from '../../middlewares/upload'
 import * as auth from '../../controllers/client/authController'
 import * as catalog from '../../controllers/client/catalogController'
 import * as user from '../../controllers/client/userController'
@@ -27,6 +28,7 @@ router.get('/products/:id/recommend', catalog.recommend)
 /* 用户中心 */
 router.get('/user/profile', requireAuth, user.profile)
 router.put('/user/profile', requireAuth, user.updateProfile)
+router.post('/user/avatar', requireAuth, avatarUpload.single('file'), user.uploadAvatar)
 router.get('/user/addresses', requireAuth, user.addresses)
 router.post('/user/addresses', requireAuth, user.createAddress)
 router.put('/user/addresses/:id', requireAuth, user.updateAddress)

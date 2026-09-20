@@ -29,13 +29,27 @@ const footprints = ref<Product[]>([])
 
 const form = ref({
   nickname: user.user?.nickname ?? '',
-  gender: 0,
-  birthday: '',
+  gender: user.user?.gender ?? 0,
+  birthday: user.user?.birthday ?? '',
   phone: user.user?.phone ?? '',
 })
 
+function syncForm() {
+  form.value = {
+    nickname: user.user?.nickname ?? '',
+    gender: user.user?.gender ?? 0,
+    birthday: user.user?.birthday ?? '',
+    phone: user.user?.phone ?? '',
+  }
+}
+
 const couponTabs = ref<0 | 1 | 2>(0)
 const shownCoupons = computed(() => coupons.value.filter((c) => c.status === couponTabs.value))
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploadingAvatar = ref(false)
+
+const AVATAR_MAX_SIZE = 2 * 1024 * 1024
 
 onMounted(async () => {
   const [a, c, fav, fp] = await Promise.all([
@@ -48,7 +62,43 @@ onMounted(async () => {
   coupons.value = c
   favorites.value = fav
   footprints.value = fp
+  try {
+    await user.loadProfile()
+    syncForm()
+  } catch {
+    // 加载失败时沿用本地缓存的资料
+  }
 })
+
+function pickAvatar() {
+  fileInput.value?.click()
+}
+
+async function onAvatarChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    ui.toast('请选择图片文件', 'error')
+    return
+  }
+  if (file.size > AVATAR_MAX_SIZE) {
+    ui.toast('图片大小不能超过 2MB', 'error')
+    return
+  }
+  uploadingAvatar.value = true
+  try {
+    const updated = await userApi.uploadAvatar(file)
+    user.user = updated
+    localStorage.setItem('xtx_user', JSON.stringify(updated))
+    ui.toast('头像已更新')
+  } catch (err) {
+    ui.toast(err instanceof Error ? err.message : '上传失败', 'error')
+  } finally {
+    uploadingAvatar.value = false
+  }
+}
 
 async function saveProfile() {
   try {
@@ -107,7 +157,16 @@ function couponLabel(c: Coupon): string {
             <div class="uc-form">
               <div class="uc-form__avatar">
                 <img :src="user.user?.avatar" alt="头像" />
-                <button class="btn btn-secondary btn-sm" @click="ui.toast('头像上传（演示）', 'info')">更换头像</button>
+                <button class="btn btn-secondary btn-sm" :disabled="uploadingAvatar" @click="pickAvatar">
+                  {{ uploadingAvatar ? '上传中…' : '更换头像' }}
+                </button>
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  class="uc-form__file"
+                  @change="onAvatarChange"
+                />
               </div>
               <div class="field">
                 <label>昵称</label>
@@ -228,6 +287,8 @@ function couponLabel(c: Coupon): string {
   border-radius: 50%;
   margin: 0 auto 12px;
   border: 3px solid var(--amz-orange);
+  object-fit: cover;
+  background: var(--bg-hover);
 }
 .uc__profile h2 {
   font-size: 18px;
@@ -343,6 +404,12 @@ function couponLabel(c: Coupon): string {
   width: 64px;
   height: 64px;
   border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border);
+  background: var(--bg-hover);
+}
+.uc-form__file {
+  display: none;
 }
 .uc-form__radio {
   display: flex;
