@@ -7,6 +7,7 @@ import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
 import PriceTag from '@/components/PriceTag.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import AddressFormModal from '@/components/AddressFormModal.vue'
 import { addMoney, formatMoney } from '@/utils/money'
 
 const router = useRouter()
@@ -15,6 +16,7 @@ const ui = useUiStore()
 
 const addresses = ref<Address[]>([])
 const coupons = ref<Coupon[]>([])
+const showAddressModal = ref(false)
 const selectedAddressId = ref<number | null>(null)
 const selectedCouponId = ref<number | null>(null)
 const remark = ref('')
@@ -35,6 +37,12 @@ const payAmount = computed(() => addMoney(goodsTotal.value, freight.value) - cou
 
 function couponLabel(c: Coupon): string {
   return c.type === 1 ? `满${c.minAmount}减${c.amount}` : `${(c.discountRate * 10).toFixed(1)}折`
+}
+
+function onAddressCreated(address: Address) {
+  addresses.value.push(address)
+  selectedAddressId.value = address.id
+  ui.toast('收货地址添加成功')
 }
 
 async function submit() {
@@ -95,7 +103,7 @@ onMounted(async () => {
                 </div>
                 <p class="addr__detail">{{ a.province }}{{ a.city }}{{ a.district }}{{ a.detail }}</p>
               </button>
-              <button class="addr addr--add" @click="ui.toast('地址管理开发中', 'info')">＋ 新增地址</button>
+              <button class="addr addr--add" @click="showAddressModal = true">＋ 新增地址</button>
             </div>
           </section>
 
@@ -184,6 +192,8 @@ onMounted(async () => {
         </aside>
       </div>
     </div>
+
+    <AddressFormModal v-model="showAddressModal" @created="onAddressCreated" />
   </div>
 </template>
 
