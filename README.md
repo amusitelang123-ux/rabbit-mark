@@ -3,7 +3,7 @@
 平台自营式 B2C 电商系统。业务链路：**商品 → 购物车 → 订单 → 支付 → 发货 → 售后**。
 
 - 开发企划书：`docs/小兔鲜电商-开发企划.md`
-- 当前进度：用户端页面 + 用户端完整 API + MySQL 库表；后台管理页面待开发
+- 当前进度：用户端页面 + 用户端完整 API + 后台管理端（独立应用）+ MySQL 库表
 
 ## 技术栈
 
@@ -19,11 +19,24 @@
 ```
 rabbit-mark/
 ├── docs/                        开发企划书
-├── web/                         用户端前端（Vue3 + TS + Vite）
-│   ├── src/api/                 接口层（contract + mock/real 双实现）
-│   ├── src/stores/              Pinia（user / cart / ui / app）
-│   ├── src/views/client/        用户端页面
-│   └── vite.config.ts           /api、/uploads 反向代理到后端
+├── web/                         前端（同一份依赖，两个独立应用）
+│   ├── index.html               用户端入口（端口 5173）
+│   ├── vite.config.ts           用户端应用配置，/api、/uploads 反向代理到后端
+│   ├── admin/                   后台管理端应用（独立入口，端口 5174）
+│   │   ├── index.html           后台入口
+│   │   ├── main.ts / App.vue    后台应用装配（Element Plus 仅在此引入）
+│   │   ├── router.ts            后台路由 + 登录/权限守卫 + 侧边栏菜单
+│   │   ├── AdminLayout.vue      后台骨架布局
+│   │   ├── views/               后台页面（商品/订单/营销/财务/权限…）
+│   │   ├── api/                 管理端接口层（前缀 /api/admin，独立 token）
+│   │   ├── stores/admin.ts      Token 与权限码
+│   │   └── utils/               图标白名单等
+│   ├── vite.admin.config.ts     后台应用配置（端口 5174、产物 dist-admin）
+│   └── src/                     用户端代码 + 两端共用层
+│       ├── api/                 用户端接口层（contract + mock/real 双实现）
+│       ├── stores/              Pinia（user / cart / ui / app）
+│       ├── views/client/        用户端页面
+│       └── router/index.ts      用户端路由（不含后台）
 ├── server/                      后端服务（Node + Express + Sequelize）
 │   ├── src/                     models / services / controllers / routes / middlewares
 │   ├── database/
@@ -78,13 +91,22 @@ npm run dev
 ```bash
 cd web
 npm install
-npm run dev
+npm run dev          # 用户端 → http://localhost:5173
 ```
 
-打开 http://localhost:5173
+后台管理端是**独立应用**（独立入口、独立端口、独立构建产物），另开一个终端：
 
-> 前端已配置代理：`/api`、`/uploads` → `http://localhost:3000`，无需额外配置。
-> 若后端端口不是 3000，请同步修改 `web/vite.config.ts` 的 proxy target。
+```bash
+cd web
+npm run dev:admin    # 后台管理端 → http://localhost:5174/admin/login
+```
+
+> 两个应用共用一份 `web/node_modules`，但入口、路由、构建配置互不影响：
+> 用户端在 5173（`vite.config.ts`），后台在 5174（`vite.admin.config.ts`）。
+> Element Plus / echarts 只在后台应用引入，用户端产物里没有它们。
+>
+> 两个应用都已配置代理：`/api`、`/uploads` → `http://localhost:3000`，无需额外配置。
+> 若后端端口不是 3000，请同步修改 `web/vite.config.ts` 与 `web/vite.admin.config.ts` 的 proxy target。
 
 ## 在 IntelliJ IDEA 中运行（推荐）
 
@@ -92,9 +114,11 @@ npm run dev
 
 | 配置名 | 说明 |
 | --- | --- |
-| **Dev (server + web)** | 一键同时启动前后端 |
+| **Dev (server + web)** | 一键同时启动后端 + 用户端 |
+| **Admin (server + admin)** | 一键同时启动后端 + 后台管理端 |
 | `server: dev` | 只启动后端（热重载） |
-| `web: dev` | 只启动前端 |
+| `web: dev` | 只启动用户端 |
+| `admin: dev` | 只启动后台管理端 |
 | `db: reset` | 重置数据库（drop→create→migrate→seed） |
 
 使用步骤：
@@ -162,10 +186,12 @@ VITE_USE_MOCK=true
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run dev` | 开发启动 |
-| `npm run build` | 类型检查 + 生产构建 |
-| `npm run preview` | 预览构建产物 |
-| `npm run typecheck` | TypeScript 类型检查 |
+| `npm run dev` | 用户端开发启动（5173） |
+| `npm run dev:admin` | 后台管理端开发启动（5174） |
+| `npm run build` | 类型检查 + 用户端生产构建（`dist/`） |
+| `npm run build:admin` | 类型检查 + 后台生产构建（`dist-admin/`） |
+| `npm run preview` / `preview:admin` | 预览各自构建产物 |
+| `npm run typecheck` | TypeScript 类型检查（含用户端 + 后台） |
 
 ## API 概览
 
@@ -202,6 +228,9 @@ VITE_USE_MOCK=true
 | 图片 404 | 确认后端已启动（图片经 `http://localhost:3000/uploads/...` 提供） |
 | 端口被占用 | 修改 `server/.env` 的 `PORT`，并同步 `web/vite.config.ts` 代理 |
 | 前端 401 | Token 失效，重新登录；或清空浏览器 localStorage 后重试 |
+| 5173 打开 `/admin/login` 跳回首页 | 正常：后台管理端在 5174（`npm run dev:admin`），5173 只有用户端路由 |
+| 后台提示未登录 / 刚登录就掉线 | 后台 Token 存在 `http://localhost:5174` 这个源的 localStorage 下，换端口或换域名需要重新登录 |
+| 5174 启动报端口占用 | 关闭已在运行的 `dev:admin`，或改 `vite.admin.config.ts` 的 `server.port` |
 
 ## 说明
 

@@ -128,9 +128,23 @@ export interface OrderItem {
   skuSpecText: string
   productImage: string
   price: number
+  /** 原价（未参与秒杀时与 price 相同） */
+  originalPrice: number
+  /** 是否参与秒杀 */
+  seckill: boolean
   quantity: number
   subtotal: number
   isCommented: boolean
+}
+
+/** 订单操作日志项 */
+export interface OrderLogItem {
+  id: number
+  action: string
+  actionText: string
+  operator: string
+  remark: string
+  createdAt: string
 }
 
 export interface Order {
@@ -139,6 +153,10 @@ export interface Order {
   items: OrderItem[]
   totalAmount: number
   discountAmount: number
+  /** 秒杀优惠快照 */
+  seckillAmount: number
+  /** 满减活动抵扣 */
+  promotionAmount: number
   couponAmount: number
   freightAmount: number
   payAmount: number
@@ -151,6 +169,8 @@ export interface Order {
   receiveTime: string | null
   remark: string
   createdAt: string
+  /** 订单操作日志时间轴（仅详情接口返回） */
+  logs: OrderLogItem[]
   logistics?: { company: string; trackingNo: string; traces: LogisticsTrace[] }
 }
 
@@ -193,4 +213,173 @@ export interface UserInfo {
   levelName: string
   points: number
   totalSpent: number
+}
+
+/** 支付渠道：1微信 2支付宝 3余额 4沙箱 */
+export type PayChannel = 1 | 2 | 3 | 4
+
+export interface PrepayResult {
+  payNo: string
+  amount: number
+  payParams: Record<string, string>
+  payUrl: string | null
+}
+
+export interface PayStatusResult {
+  payNo: string
+  payStatus: number
+  orderNo: string
+  orderStatus: OrderStatus | null
+}
+
+/** 售后单 */
+export interface Refund {
+  id: number
+  refundNo: string
+  orderId: number
+  orderNo: string
+  orderItemId: number | null
+  productName: string
+  productImage: string
+  type: number
+  reason: string
+  amount: number
+  images: string[]
+  status: number
+  auditRemark: string
+  auditAt: string | null
+  createdAt: string
+}
+
+/** 我的评价（已评价） */
+export interface MyComment {
+  id: number
+  productId: number
+  productName: string
+  productImage: string
+  score: number
+  content: string
+  images: string[]
+  isAnonymous: boolean
+  replyContent: string
+  status: number
+  createdAt: string
+}
+
+/** 待评价明细 */
+export interface PendingComment {
+  orderItemId: number
+  orderNo: string
+  productId: number
+  productName: string
+  productImage: string
+  skuSpecText: string
+  createdAt: string
+}
+
+export interface MyComments {
+  pending: PendingComment[]
+  done: MyComment[]
+}
+
+/** 积分流水 */
+export interface PointsLog {
+  id: number
+  type: number
+  change: number
+  balance: number
+  remark: string
+  createdAt: string
+}
+
+export interface MyPoints {
+  balance: number
+  todaySigned: boolean
+  logs: PointsLog[]
+}
+
+/** 生效中的满减活动 */
+export interface ActivePromotion {
+  id: number
+  name: string
+  type: number
+  endTime: string
+  thresholds: { amount: number; reduce: number }[]
+}
+
+/** 帮助中心 FAQ */
+export interface FaqItem {
+  id: number
+  category: string
+  question: string
+  answer: string
+  sort: number
+  status: number
+  createdAt: string
+}
+
+export interface FaqGroup {
+  category: string
+  items: FaqItem[]
+}
+
+export interface LogisticsCompanyItem {
+  id: number
+  name: string
+  code: string
+  phone: string
+  sort: number
+  status: number
+}
+
+/** 秒杀商品项 */
+export interface SeckillItem {
+  id: number
+  productId: number
+  skuId: number
+  productName: string
+  productImage: string
+  skuSpecText: string
+  originalPrice: number
+  seckillPrice: number
+  remaining: number
+  limitPerUser: number
+}
+
+/** 进行中的秒杀活动 */
+export interface ActiveSeckill {
+  id: number
+  name: string
+  startTime: string
+  endTime: string
+  endTimestamp: number
+  products: SeckillItem[]
+}
+
+/** 留言工单 */
+export interface FeedbackItem {
+  id: number
+  userId: number
+  nickname: string
+  avatar: string
+  type: number
+  content: string
+  images: string[]
+  contact: string
+  orderNo: string
+  status: number
+  replyContent: string
+  replyAt: string | null
+  replier: string
+  createdAt: string
+}
+
+/** 公开系统配置 */
+export interface PublicConfig {
+  siteName: string
+  logo: string
+  slogan: string
+  servicePhone: string
+  serviceEmail: string
+  serviceHours: string
 }

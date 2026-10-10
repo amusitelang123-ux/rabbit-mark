@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { orderApi } from '@/api'
+import { orderApi, refundApi } from '@/api'
 import type { Order } from '@/api/types'
 import { ORDER_STATUS_TEXT } from '@/constants/order'
 import { useUiStore } from '@/stores/ui'
 import EmptyState from '@/components/EmptyState.vue'
 import PriceTag from '@/components/PriceTag.vue'
+import PayDialog from './components/PayDialog.vue'
 import { formatMoney } from '@/utils/money'
 
 const route = useRoute()
@@ -14,6 +15,7 @@ const ui = useUiStore()
 
 const order = ref<Order | null>(null)
 const loading = ref(true)
+const payVisible = ref(false)
 
 const steps = [
   { status: 10, label: '提交订单' },
@@ -32,16 +34,77 @@ const stepIndex = computed(() => {
 
 const isClosed = computed(() => order.value && [50, 60, 70].includes(order.value.status))
 
-function act(label: string) {
-  if (label === '去支付') {
-    ui.toast('跳转支付（演示）', 'info')
+async function reload() {
+  order.value = (await orderApi.detail(route.params.orderNo as string)) ?? null
+}
+
+function pay() {
+  payVisible.value = true
+}
+
+async function cancelOrder() {
+  if (!order.value) return
+  try {
+    await orderApi.cancel(order.value.orderNo)
+    ui.toast('订单已取消', 'success')
+    await reload()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '操作失败', 'error')
+  }
+}
+
+async function confirmOrder() {
+  if (!order.value) return
+  try {
+    await orderApi.confirm(order.value.orderNo)
+    ui.toast('已确认收货', 'success')
+    await reload()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '操作失败', 'error')
+  }
+}
+
+function remindShip() {
+  ui.toast('已提醒商家尽快发货', 'success')
+}
+
+const refundVisible = ref(false)
+const refundType = ref(1)
+const refundReason = ref('')
+const refundSubmitting = ref(false)
+const canRefund = computed(() => order.value && [20, 30, 40].includes(order.value.status))
+
+function openRefund() {
+  refundType.value = 1
+  refundReason.value = ''
+  refundVisible.value = true
+}
+
+async function submitRefund() {
+  if (!order.value) return
+  if (!refundReason.value.trim()) {
+    ui.toast('请填写售后原因', 'error')
     return
   }
-  ui.toast(`${label}（演示）`, 'info')
+  refundSubmitting.value = true
+  try {
+    await refundApi.apply({
+      orderNo: order.value.orderNo,
+      type: refundType.value,
+      reason: refundReason.value.trim(),
+    })
+    ui.toast('售后申请已提交，请等待审核')
+    refundVisible.value = false
+    await reload()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '提交失败', 'error')
+  } finally {
+    refundSubmitting.value = false
+  }
 }
 
 onMounted(async () => {
-  order.value = (await orderApi.detail(route.params.orderNo as string)) ?? null
+  await reload()
   loading.value = false
 })
 </script>
@@ -62,9 +125,14 @@ onMounted(async () => {
             <p class="muted">订单号：{{ order.orderNo }} · 下单时间：{{ order.createdAt }}</p>
           </div>
           <div class="od-head__actions">
-            <button class="btn btn-primary btn-sm" @click="act(order.status === 10 ? '去支付' : '再次购买')">
-              {{ order.status === 10 ? '去支付' : '再次购买' }}
-            </button>
+            <template v-if="order.status === 10">
+              <button class="btn btn-secondary btn-sm" @click="cancelOrder">取消订单</button>
+              <button class="btn btn-primary btn-sm" @click="pay">去支付</button>
+            </template>
+            <button v-else-if="order.status === 20" class="btn btn-secondary btn-sm" @click="remindShip">提醒发货</button>
+            <button v-else-if="order.status === 30" class="btn btn-primary btn-sm" @click="confirmOrder">确认收货</button>
+            <button v-else class="btn btn-primary btn-sm" @click="ui.toast('再次购买（演示）', 'info')">再次购买</button>
+            <button v-if="canRefund" class="btn btn-secondary btn-sm" @click="openRefund">申请售后</button>
             <button class="btn btn-secondary btn-sm" @click="ui.toast('联系客服（演示）', 'info')">联系客服</button>
           </div>
         </div>
@@ -96,7 +164,10 @@ onMounted(async () => {
                   <img :src="it.productImage" :alt="it.productName" />
                   <div class="od-items__info">
                     <router-link :to="`/product/${it.productId}`" class="od-items__name">{{ it.productName }}</router-link>
-                    <p class="muted">{{ it.skuSpecText }}</p>
+                    <p class="muted">
+                      <span v-if="it.seckill" class="od-seckill-tag">秒杀</span>
+                      {{ it.skuSpecText }}
+                    </p>
                   </div>
                   <span class="od-items__price">¥{{ formatMoney(it.price) }} × {{ it.quantity }}</span>
                   <b class="od-items__subtotal">¥{{ formatMoney(it.subtotal) }}</b>
@@ -120,13 +191,33 @@ onMounted(async () => {
                 </li>
               </ul>
             </section>
+
+            <section class="card block">
+              <h2 class="block__title">订单进度</h2>
+              <ul class="od-logs">
+                <li v-for="log in order.logs" :key="log.id">
+                  <span class="od-logs__dot" />
+                  <div>
+                    <p class="od-logs__action">{{ log.actionText }}</p>
+                    <p class="muted">{{ log.createdAt }}<span v-if="log.remark"> · {{ log.remark }}</span></p>
+                  </div>
+                </li>
+              </ul>
+              <p v-if="!order.logs.length" class="muted">暂无进度记录</p>
+            </section>
           </div>
 
           <aside class="card block od-summary">
             <h2 class="block__title">金额明细</h2>
             <div class="od-summary__row"><span>商品总额</span><b>¥{{ formatMoney(order.totalAmount) }}</b></div>
             <div class="od-summary__row"><span>运费</span><b>{{ order.freightAmount === 0 ? '免运费' : `¥${formatMoney(order.freightAmount)}` }}</b></div>
-            <div class="od-summary__row"><span>优惠抵扣</span><b class="is-minus">-¥{{ formatMoney(order.couponAmount) }}</b></div>
+            <div v-if="order.seckillAmount > 0" class="od-summary__row">
+              <span>秒杀优惠</span><b class="is-minus">-¥{{ formatMoney(order.seckillAmount) }}</b>
+            </div>
+            <div class="od-summary__row"><span>优惠券抵扣</span><b class="is-minus">-¥{{ formatMoney(order.couponAmount) }}</b></div>
+            <div v-if="order.promotionAmount > 0" class="od-summary__row">
+              <span>满减优惠</span><b class="is-minus">-¥{{ formatMoney(order.promotionAmount) }}</b>
+            </div>
             <div class="od-summary__total">
               <span>实付金额</span>
               <PriceTag :amount="order.payAmount" size="lg" />
@@ -136,6 +227,38 @@ onMounted(async () => {
             </p>
             <p v-if="order.payTime" class="od-summary__pay muted">支付时间：{{ order.payTime }}</p>
           </aside>
+        </div>
+
+        <PayDialog v-model="payVisible" :order-no="order.orderNo" :amount="order.payAmount" @paid="reload" />
+
+        <div v-if="refundVisible" class="rf-mask" @click.self="refundVisible = false">
+          <div class="rf-modal card">
+            <h2 class="rf-title">申请售后</h2>
+            <p class="muted">订单号：{{ order.orderNo }} · 实付 ¥{{ formatMoney(order.payAmount) }}</p>
+
+            <p class="rf-label">售后类型</p>
+            <div class="rf-types">
+              <button
+                v-for="t in [{ v: 1, l: '仅退款' }, { v: 2, l: '退货退款' }, { v: 3, l: '换货' }]"
+                :key="t.v"
+                class="rf-type"
+                :class="{ 'is-active': refundType === t.v }"
+                @click="refundType = t.v"
+              >
+                {{ t.l }}
+              </button>
+            </div>
+
+            <p class="rf-label">售后原因</p>
+            <textarea v-model="refundReason" class="rf-textarea" rows="3" placeholder="请描述遇到的问题" />
+
+            <div class="rf-actions">
+              <button class="btn btn-secondary" @click="refundVisible = false">取消</button>
+              <button class="btn btn-primary" :disabled="refundSubmitting" @click="submitRefund">
+                {{ refundSubmitting ? '提交中…' : '提交申请' }}
+              </button>
+            </div>
+          </div>
         </div>
       </template>
     </div>
@@ -338,6 +461,40 @@ onMounted(async () => {
 .od-summary__row .is-minus {
   color: var(--amz-success);
 }
+.od-seckill-tag {
+  display: inline-block;
+  background: #c0392b;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.od-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.od-logs li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.od-logs__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amz-orange);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+.od-logs__action {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
 .od-summary__total {
   display: flex;
   justify-content: space-between;
@@ -377,5 +534,70 @@ onMounted(async () => {
   .od-items__price {
     grid-column: 2 / -1;
   }
+}
+
+.rf-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+.rf-modal {
+  width: 100%;
+  max-width: 440px;
+  padding: 22px;
+}
+.rf-title {
+  font-size: 19px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.rf-label {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 16px 0 8px;
+}
+.rf-types {
+  display: flex;
+  gap: 10px;
+}
+.rf-type {
+  flex: 1;
+  padding: 9px 0;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text);
+}
+.rf-type.is-active {
+  border-color: var(--amz-orange);
+  background: #fff8ec;
+  color: var(--amz-price);
+  font-weight: 700;
+}
+.rf-textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+.rf-textarea:focus {
+  border-color: var(--amz-orange);
+}
+.rf-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
 }
 </style>

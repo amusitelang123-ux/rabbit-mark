@@ -305,6 +305,8 @@ function orderItems(p: Product, skuIndex: number, qty: number, commented = false
     skuSpecText: sku.specText,
     productImage: p.mainImage,
     price: sku.price,
+    originalPrice: sku.price,
+    seckill: false,
     quantity: qty,
     subtotal,
     isCommented: commented,
@@ -319,8 +321,9 @@ export const orders: Order[] = STATUSES.map((status, i) => {
   const items = [orderItems(p1, i, (i % 2) + 1, status === 40), ...(i % 2 === 0 ? [orderItems(p2, i + 1, 1, status === 40)] : [])]
   const totalAmount = addMoney(...items.map((it) => it.subtotal))
   const couponAmount = i % 3 === 0 ? Math.min(30, Math.round(totalAmount * 0.1)) : 0
+  const promotionAmount = totalAmount >= 199 ? 20 : 0
   const freightAmount = totalAmount >= 99 ? 0 : 8
-  const payAmount = addMoney(totalAmount, freightAmount) - couponAmount
+  const payAmount = addMoney(totalAmount, freightAmount) - couponAmount - promotionAmount
   const day = String(28 - i).padStart(2, '0')
   const createdAt = `2026-09-${day} 14:${String(10 + i).padStart(2, '0')}:00`
   return {
@@ -328,8 +331,10 @@ export const orders: Order[] = STATUSES.map((status, i) => {
     status,
     items,
     totalAmount,
-    discountAmount: couponAmount,
+    discountAmount: couponAmount + promotionAmount,
+    seckillAmount: 0,
     couponAmount,
+    promotionAmount,
     freightAmount,
     payAmount,
     receiverName: addresses[0].receiver,
@@ -341,6 +346,16 @@ export const orders: Order[] = STATUSES.map((status, i) => {
     receiveTime: status === 40 ? createdAt : null,
     remark: i % 2 === 0 ? '请尽快发货，谢谢' : '',
     createdAt,
+    logs: [
+      {
+        id: i * 10 + 1,
+        action: 'create',
+        actionText: '提交订单',
+        operator: 'user:1',
+        remark: '',
+        createdAt,
+      },
+    ],
     logistics:
       status >= 30
         ? {

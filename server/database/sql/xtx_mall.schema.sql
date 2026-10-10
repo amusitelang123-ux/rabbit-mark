@@ -277,8 +277,10 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `order_no` VARCHAR(32) NOT NULL COMMENT '订单号',
   `user_id` BIGINT UNSIGNED NOT NULL,
   `status` TINYINT NOT NULL DEFAULT 10 COMMENT '10待付款 20待发货 30待收货 40已完成 50退款中 60已退款 70已取消',
-  `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '商品总额',
-  `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '优惠总额',
+  `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '商品总额(原价)',
+  `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '优惠总额(秒杀+满减+券)',
+  `seckill_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '秒杀优惠快照',
+  `promotion_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '满减优惠快照',
   `coupon_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '优惠券抵扣',
   `freight_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '运费',
   `pay_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '应付金额',
@@ -314,6 +316,8 @@ CREATE TABLE IF NOT EXISTS `order_items` (
   `sku_spec_text` VARCHAR(200) NULL COMMENT '快照:规格',
   `product_image` VARCHAR(255) NULL COMMENT '快照:图片',
   `price` DECIMAL(10,2) NOT NULL COMMENT '快照:成交单价',
+  `original_price` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '快照:原价(未参与秒杀时等于 price)',
+  `seckill_product_id` BIGINT UNSIGNED NULL COMMENT '关联秒杀商品 id，非秒杀订单为空',
   `quantity` INT NOT NULL,
   `subtotal` DECIMAL(10,2) NOT NULL,
   `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -562,7 +566,7 @@ CREATE TABLE IF NOT EXISTS `role_permissions` (
 
 CREATE TABLE IF NOT EXISTS `admin_logs` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `admin_id` BIGINT UNSIGNED NOT NULL,
+  `admin_id` BIGINT UNSIGNED NULL COMMENT '管理员 id；登录失败且账号不存在时为空',
   `module` VARCHAR(50) NULL,
   `action` VARCHAR(50) NULL,
   `target_id` BIGINT UNSIGNED NULL,
@@ -604,5 +608,96 @@ CREATE TABLE IF NOT EXISTS `stat_daily` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_stat_date` (`stat_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='每日经营统计表(预聚合)';
+
+-- =============================================================
+-- 内容与配置域（补充）
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS `faqs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `category` VARCHAR(50) NOT NULL COMMENT '问题分类，如 购物指南/支付相关',
+  `question` VARCHAR(255) NOT NULL,
+  `answer` TEXT NULL,
+  `sort` INT NOT NULL DEFAULT 0,
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_category_sort` (`category`, `sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='常见问题FAQ表';
+
+CREATE TABLE IF NOT EXISTS `logistics_companies` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(50) NOT NULL COMMENT '物流公司名称',
+  `code` VARCHAR(30) NOT NULL COMMENT '编码，如 SF',
+  `phone` VARCHAR(20) NULL COMMENT '客服电话',
+  `sort` INT NOT NULL DEFAULT 0,
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='物流公司字典表';
+
+CREATE TABLE IF NOT EXISTS `freight_templates` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(50) NOT NULL COMMENT '模板名称',
+  `free_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '满额包邮门槛，0 表示不参与包邮',
+  `base_freight` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '未达门槛时的基础运费',
+  `is_default` TINYINT NOT NULL DEFAULT 0 COMMENT '1 默认模板（全局唯一）',
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='运费模板表';
+
+-- =============================================================
+-- 订单操作日志（A-25）
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS `order_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `order_id` BIGINT UNSIGNED NOT NULL,
+  `action` VARCHAR(50) NOT NULL COMMENT '动作: create/pay/ship/confirm/cancel/auto_close/admin_close/refund_apply/refund_approve/refund_reject',
+  `operator` VARCHAR(50) NOT NULL COMMENT '操作人: user:{id} / admin:{id} / system',
+  `remark` VARCHAR(255) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_order_time` (`order_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='订单操作日志表';
+
+-- =============================================================
+-- 系统配置（A-75）与留言工单（U-70/U-74）
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS `settings` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `config_group` VARCHAR(30) NOT NULL DEFAULT 'site' COMMENT '分组: site/service',
+  `config_key` VARCHAR(50) NOT NULL COMMENT '配置键，全局唯一',
+  `config_value` TEXT NULL,
+  `remark` VARCHAR(255) NULL COMMENT '配置说明',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_config_key` (`config_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='系统配置表';
+
+CREATE TABLE IF NOT EXISTS `feedbacks` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `type` TINYINT NOT NULL DEFAULT 1 COMMENT '1咨询 2投诉 3建议',
+  `content` TEXT NOT NULL,
+  `images` JSON NULL,
+  `contact` VARCHAR(100) NULL COMMENT '联系方式',
+  `order_no` VARCHAR(32) NULL COMMENT '关联订单号',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待处理 1已回复 2已关闭',
+  `reply_content` TEXT NULL,
+  `reply_at` DATETIME NULL,
+  `replier` VARCHAR(50) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user` (`user_id`),
+  KEY `idx_status_time` (`status`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='留言工单表';
 
 SET FOREIGN_KEY_CHECKS = 1;

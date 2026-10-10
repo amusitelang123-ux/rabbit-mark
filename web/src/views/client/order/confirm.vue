@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { addressApi, couponApi, orderApi } from '@/api'
-import type { Address, Coupon } from '@/api/types'
+import { addressApi, couponApi, orderApi, promotionApi, seckillApi } from '@/api'
+import type { ActivePromotion, ActiveSeckill, Address, Coupon } from '@/api/types'
 import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
+import { useAddressStore } from '@/stores/address'
 import PriceTag from '@/components/PriceTag.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import AddressFormModal from '@/components/AddressFormModal.vue'
@@ -13,6 +14,7 @@ import { addMoney, formatMoney } from '@/utils/money'
 const router = useRouter()
 const cart = useCartStore()
 const ui = useUiStore()
+const addressStore = useAddressStore()
 
 const addresses = ref<Address[]>([])
 const coupons = ref<Coupon[]>([])
@@ -24,16 +26,58 @@ const invoice = ref<'none' | 'normal' | 'special'>('none')
 const submitting = ref(false)
 
 const items = computed(() => cart.selectedItems)
+/** 商品原价总额 */
 const goodsTotal = computed(() => cart.selectedTotal)
-const freight = computed(() => (goodsTotal.value >= 99 || goodsTotal.value === 0 ? 0 : 8))
-const usableCoupons = computed(() => coupons.value.filter((c) => goodsTotal.value >= c.minAmount))
+
+/* 秒杀：skuId -> 秒杀价，与后端一致按 SKU 匹配进行中的活动 */
+const activeSeckills = ref<ActiveSeckill[]>([])
+const seckillPriceMap = computed(() => {
+  const map = new Map<number, number>()
+  for (const act of activeSeckills.value) {
+    for (const p of act.products) map.set(p.skuId, p.seckillPrice)
+  }
+  return map
+})
+const seckillAmount = computed(() => {
+  let total = 0
+  for (const item of items.value) {
+    const seckillPrice = seckillPriceMap.value.get(item.skuId)
+    if (seckillPrice != null && seckillPrice < item.price) {
+      total += (item.price - seckillPrice) * item.quantity
+    }
+  }
+  return Math.round(total * 100) / 100
+})
+/** 秒杀后商品额，后续满减/券/运费均以此为基数（与后端一致） */
+const effectiveTotal = computed(() => Math.max(0, goodsTotal.value - seckillAmount.value))
+
+const freight = computed(() => (effectiveTotal.value >= 99 || effectiveTotal.value === 0 ? 0 : 8))
+const usableCoupons = computed(() => coupons.value.filter((c) => effectiveTotal.value >= c.minAmount))
 const selectedCoupon = computed(() => usableCoupons.value.find((c) => c.id === selectedCouponId.value))
 const couponAmount = computed(() => {
   if (!selectedCoupon.value) return 0
-  if (selectedCoupon.value.type === 1) return Math.min(selectedCoupon.value.amount, goodsTotal.value)
-  return goodsTotal.value * (1 - selectedCoupon.value.discountRate)
+  if (selectedCoupon.value.type === 1) return Math.min(selectedCoupon.value.amount, effectiveTotal.value)
+  return effectiveTotal.value * (1 - selectedCoupon.value.discountRate)
 })
-const payAmount = computed(() => addMoney(goodsTotal.value, freight.value) - couponAmount.value)
+/* 满减活动：与后端一致，取满足门槛中减免最大的一档 */
+const activePromotions = ref<ActivePromotion[]>([])
+const promotionAmount = computed(() => {
+  let best = 0
+  for (const p of activePromotions.value) {
+    if (p.type !== 1) continue
+    for (const t of p.thresholds) {
+      if (effectiveTotal.value >= t.amount && t.reduce > best) best = t.reduce
+    }
+  }
+  return best
+})
+const matchedPromotion = computed(() =>
+  activePromotions.value.find((p) => p.type === 1 && p.thresholds.some((t) => t.amount <= effectiveTotal.value)),
+)
+
+const payAmount = computed(() =>
+  Math.max(0, addMoney(effectiveTotal.value, freight.value) - couponAmount.value - promotionAmount.value),
+)
 
 function couponLabel(c: Coupon): string {
   return c.type === 1 ? `满${c.minAmount}减${c.amount}` : `${(c.discountRate * 10).toFixed(1)}折`
@@ -42,6 +86,7 @@ function couponLabel(c: Coupon): string {
 function onAddressCreated(address: Address) {
   addresses.value.push(address)
   selectedAddressId.value = address.id
+  addressStore.load()
   ui.toast('收货地址添加成功')
 }
 
@@ -69,9 +114,16 @@ async function submit() {
 }
 
 onMounted(async () => {
-  const [addrs, cps] = await Promise.all([addressApi.list(), couponApi.center()])
+  const [addrs, cps, promos, secks] = await Promise.all([
+    addressApi.list(),
+    couponApi.center(),
+    promotionApi.active().catch(() => []),
+    seckillApi.active().catch(() => []),
+  ])
   addresses.value = addrs
   coupons.value = cps
+  activePromotions.value = promos
+  activeSeckills.value = secks
   selectedAddressId.value = addrs.find((a) => a.isDefault)?.id ?? addrs[0]?.id ?? null
 })
 </script>
@@ -176,8 +228,19 @@ onMounted(async () => {
         <aside class="summary card">
           <h2 class="block__title">订单摘要</h2>
           <div class="summary__row"><span>商品总额</span><b>¥{{ formatMoney(goodsTotal) }}</b></div>
+          <div v-if="seckillAmount > 0" class="summary__row">
+            <span>秒杀优惠</span>
+            <b class="is-minus">-¥{{ formatMoney(seckillAmount) }}</b>
+          </div>
           <div class="summary__row"><span>运费</span><b>{{ freight === 0 ? '免运费' : `¥${formatMoney(freight)}` }}</b></div>
-          <div class="summary__row"><span>优惠抵扣</span><b class="is-minus">-¥{{ formatMoney(couponAmount) }}</b></div>
+          <div class="summary__row"><span>优惠券抵扣</span><b class="is-minus">-¥{{ formatMoney(couponAmount) }}</b></div>
+          <div class="summary__row">
+            <span>满减优惠</span>
+            <b class="is-minus">-¥{{ formatMoney(promotionAmount) }}</b>
+          </div>
+          <p v-if="matchedPromotion" class="summary__promo">
+            🎉 已参与「{{ matchedPromotion.name }}」，下单自动抵扣
+          </p>
           <div class="summary__total">
             <span>应付金额</span>
             <PriceTag :amount="payAmount" size="lg" />
@@ -396,6 +459,14 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.9;
+}
+.summary__promo {
+  margin: 4px 0 10px;
+  font-size: 12.5px;
+  color: var(--amz-price);
+  background: #fff8ec;
+  border-radius: 6px;
+  padding: 7px 10px;
 }
 
 @media (max-width: 1000px) {

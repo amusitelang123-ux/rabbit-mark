@@ -24,6 +24,7 @@ export const config = {
   },
   adapter: {
     pay: process.env.PAY_ADAPTER || 'sandbox',
+    paySecret: process.env.PAY_SECRET || 'xtx_sandbox_secret',
     sms: process.env.SMS_ADAPTER || 'console',
     logistics: process.env.LOGISTICS_ADAPTER || 'mock',
   },

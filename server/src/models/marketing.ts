@@ -139,6 +139,33 @@ Notice.init(
   { sequelize, tableName: 'notices', timestamps: true, updatedAt: false },
 )
 
+export class Promotion extends Model<InferAttributes<Promotion>, InferCreationAttributes<Promotion>> {
+  declare id: CreationOptional<number>
+  declare name: string
+  declare type: number
+  declare ruleJson: { thresholds: { amount: number; reduce: number }[] } | { amount: number; gift: string }
+  declare startTime: Date
+  declare endTime: Date
+  declare status: CreationOptional<number>
+  declare createdAt: CreationOptional<Date>
+  declare updatedAt: CreationOptional<Date>
+}
+
+Promotion.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    name: { type: DataTypes.STRING(100), allowNull: false },
+    type: { type: DataTypes.TINYINT, allowNull: false },
+    ruleJson: { type: DataTypes.JSON, allowNull: false },
+    startTime: { type: DataTypes.DATE, allowNull: false },
+    endTime: { type: DataTypes.DATE, allowNull: false },
+    status: { type: DataTypes.TINYINT, defaultValue: 1 },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'promotions', timestamps: true },
+)
+
 export class SeckillProduct extends Model<
   InferAttributes<SeckillProduct>,
   InferCreationAttributes<SeckillProduct>

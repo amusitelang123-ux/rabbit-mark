@@ -5,10 +5,16 @@ import type { Address } from '@/api/types'
 import { useUiStore } from '@/stores/ui'
 import { regionMap } from '@/constants/regions'
 
-const props = defineProps<{ modelValue: boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [value: boolean]; created: [address: Address] }>()
+const props = defineProps<{ modelValue: boolean; address?: Address | null }>()
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean]
+  created: [address: Address]
+  updated: [address: Address]
+}>()
 
 const ui = useUiStore()
+
+const isEdit = computed(() => !!props.address)
 
 const receiver = ref('')
 const phone = ref('')
@@ -23,14 +29,22 @@ const provinces = Object.keys(regionMap)
 const cities = computed(() => (province.value ? Object.keys(regionMap[province.value] ?? {}) : []))
 const districts = computed(() => (province.value && city.value ? regionMap[province.value]?.[city.value] ?? [] : []))
 
-watch(province, () => {
-  city.value = ''
-  district.value = ''
-})
+watch(
+  province,
+  () => {
+    city.value = ''
+    district.value = ''
+  },
+  { flush: 'sync' },
+)
 
-watch(city, () => {
-  district.value = ''
-})
+watch(
+  city,
+  () => {
+    district.value = ''
+  },
+  { flush: 'sync' },
+)
 
 watch(
   () => props.modelValue,
@@ -40,13 +54,14 @@ watch(
 )
 
 function reset() {
-  receiver.value = ''
-  phone.value = ''
-  province.value = ''
-  city.value = ''
-  district.value = ''
-  detail.value = ''
-  isDefault.value = false
+  const a = props.address
+  receiver.value = a?.receiver ?? ''
+  phone.value = a?.phone ?? ''
+  province.value = a?.province ?? ''
+  city.value = a?.city ?? ''
+  district.value = a?.district ?? ''
+  detail.value = a?.detail ?? ''
+  isDefault.value = a?.isDefault ?? false
 }
 
 function close() {
@@ -73,7 +88,7 @@ async function submit() {
   }
   submitting.value = true
   try {
-    const address = await addressApi.create({
+    const payload = {
       receiver: receiver.value.trim(),
       phone: phone.value.trim(),
       province: province.value,
@@ -81,8 +96,14 @@ async function submit() {
       district: district.value,
       detail: detail.value.trim(),
       isDefault: isDefault.value,
-    })
-    emit('created', address)
+    }
+    if (props.address) {
+      const updated = await addressApi.update(props.address.id, payload)
+      emit('updated', updated)
+    } else {
+      const address = await addressApi.create(payload)
+      emit('created', address)
+    }
     emit('update:modelValue', false)
   } catch (err) {
     ui.toast(err instanceof Error ? err.message : '保存失败', 'error')
@@ -96,9 +117,9 @@ async function submit() {
   <Teleport to="body">
     <Transition name="afm">
       <div v-if="modelValue" class="afm" @click.self="close">
-        <div class="afm__dialog" role="dialog" aria-modal="true" aria-label="新增收货地址">
+        <div class="afm__dialog" role="dialog" aria-modal="true" :aria-label="isEdit ? '编辑收货地址' : '新增收货地址'">
           <header class="afm__head">
-            <h2>新增收货地址</h2>
+            <h2>{{ isEdit ? '编辑收货地址' : '新增收货地址' }}</h2>
             <button class="afm__close" type="button" aria-label="关闭" @click="close">×</button>
           </header>
 

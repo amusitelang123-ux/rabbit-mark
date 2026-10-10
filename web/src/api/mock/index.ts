@@ -1,14 +1,19 @@
-import type { Address, CommentItem, Coupon, Order, PageResult } from '../types'
+import type { Address, CommentItem, Coupon, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Refund } from '../types'
 import type {
   AddressPayload,
+  ApplyRefundPayload,
   CartAddPayload,
   ClientApi,
+  CreateCommentPayload,
+  CreateFeedbackPayload,
   CreateOrderPayload,
   HomeData,
   LoginResult,
+  PrepayPayload,
   ProfilePatch,
   ProductQuery,
   RegisterPayload,
+  SandboxPayPayload,
 } from '../contract'
 import {
   addresses as mockAddresses,
@@ -50,6 +55,8 @@ function paginate<T>(list: T[], page: number, pageSize: number): PageResult<T> {
 let addresses: Address[] = [...mockAddresses]
 let orders: Order[] = [...mockOrders]
 let cart: { id: number; productId: number; skuId: number; quantity: number; selected: boolean }[] = []
+const payRecords = new Map<string, string>()
+let refunds: Refund[] = []
 
 function cartView() {
   return cart
@@ -144,6 +151,7 @@ export const mockApi: ClientApi = {
   couponApi: {
     center: (): Promise<Coupon[]> => delay(mockCoupons.filter((c) => c.status === 0)),
     mine: (): Promise<Coupon[]> => delay(mockCoupons),
+    receive: (id: number) => delay({ id: Date.now(), couponId: id }),
   },
 
   orderApi: {
@@ -166,22 +174,34 @@ export const mockApi: ClientApi = {
     list: () => delay(addresses),
     create: (payload: AddressPayload) => {
       const created: Address = { id: Date.now(), ...payload, isDefault: payload.isDefault ?? false }
+      if (created.isDefault) addresses = addresses.map((a) => ({ ...a, isDefault: false }))
       addresses = [created, ...addresses]
       return delay(created)
     },
     update: (id, payload) => {
       const idx = addresses.findIndex((a) => a.id === id)
-      if (idx >= 0) addresses[idx] = { ...addresses[idx], ...payload }
+      if (idx < 0) return delay(undefined as unknown as Address)
+      const merged: Address = { ...addresses[idx], ...payload }
+      if (merged.isDefault) addresses = addresses.map((a) => (a.id === id ? a : { ...a, isDefault: false }))
+      addresses[idx] = merged
       return delay(addresses[idx])
     },
     remove: (id) => {
+      const wasDefault = addresses.find((a) => a.id === id)?.isDefault
       addresses = addresses.filter((a) => a.id !== id)
+      if (wasDefault && addresses.length) addresses[0] = { ...addresses[0], isDefault: true }
       return delay(undefined as void)
     },
   },
 
   userApi: {
     login: (): Promise<LoginResult> => delay({ user: demoUser, token: 'mock-token', refreshToken: 'mock-refresh' }),
+    captcha: () =>
+      delay({
+        captchaId: 'mock-captcha',
+        image: `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#f2f4f7" rx="6"/><text x="60" y="27" font-family="monospace" font-size="22" font-weight="700" fill="#2d3a4d" text-anchor="middle">AB3D</text></svg>')}`,
+        expireIn: 300,
+      }),
     register: (_payload: RegisterPayload): Promise<LoginResult> =>
       delay({ user: demoUser, token: 'mock-token', refreshToken: 'mock-refresh' }),
     profile: () => delay(demoUser),
@@ -190,6 +210,9 @@ export const mockApi: ClientApi = {
       demoUser.avatar = URL.createObjectURL(file)
       return delay({ ...demoUser })
     },
+    changePassword: () => delay({ changed: true }),
+    sendSmsCode: (phone: string) => delay({ phone, code: '8888' }),
+    resetPassword: () => delay({ reset: true }),
     favorites: () => delay(mockProducts.slice(0, 4)),
     toggleFavorite: () => delay({ favorited: true }),
     footprints: () => delay(mockProducts.slice(4, 8)),
@@ -223,5 +246,184 @@ export const mockApi: ClientApi = {
       cart = cart.filter((c) => !ids.includes(c.id))
       return delay(cartView())
     },
+  },
+
+  paymentApi: {
+    prepay: (payload: PrepayPayload): Promise<PrepayResult> => {
+      const payNo = `PAY${Date.now()}`
+      payRecords.set(payNo, payload.orderNo)
+      const order = orders.find((o) => o.orderNo === payload.orderNo)
+      return delay({
+        payNo,
+        amount: order?.payAmount ?? 0,
+        payParams: { sandboxToken: 'mock-token', channel: String(payload.channel) },
+        payUrl: null,
+      })
+    },
+    status: (payNo: string): Promise<PayStatusResult> => {
+      const orderNo = payRecords.get(payNo) ?? ''
+      const order = orders.find((o) => o.orderNo === orderNo)
+      return delay({
+        payNo,
+        payStatus: order && order.status !== 10 ? 1 : 0,
+        orderNo,
+        orderStatus: order?.status ?? null,
+      })
+    },
+    sandboxPay: (payload: SandboxPayPayload): Promise<void> => {
+      const orderNo = payRecords.get(payload.payNo)
+      const order = orders.find((o) => o.orderNo === orderNo)
+      if (order) order.status = 20
+      return delay(undefined as void)
+    },
+  },
+
+  refundApi: {
+    apply: (payload: ApplyRefundPayload): Promise<Refund> => {
+      const order = orders.find((o) => o.orderNo === payload.orderNo)
+      if (order) order.status = 50
+      const refund: Refund = {
+        id: Date.now(),
+        refundNo: `RF${Date.now()}`,
+        orderId: 0,
+        orderNo: payload.orderNo,
+        orderItemId: payload.orderItemId ?? null,
+        productName: '',
+        productImage: '',
+        type: payload.type,
+        reason: payload.reason,
+        amount: payload.amount ?? order?.payAmount ?? 0,
+        images: payload.images ?? [],
+        status: 0,
+        auditRemark: '',
+        auditAt: null,
+        createdAt: '',
+      }
+      refunds = [refund, ...refunds]
+      return delay(refund)
+    },
+    mine: () => delay(refunds),
+  },
+
+  commentApi: {
+    mine: (): Promise<MyComments> => delay({ pending: [], done: [] }),
+    create: (payload: CreateCommentPayload): Promise<MyComment> =>
+      delay({
+        id: Date.now(),
+        productId: 0,
+        productName: '',
+        productImage: '',
+        score: payload.score,
+        content: payload.content,
+        images: payload.images ?? [],
+        isAnonymous: Boolean(payload.isAnonymous),
+        replyContent: '',
+        status: 1,
+        createdAt: '',
+      }),
+  },
+
+  pointsApi: {
+    mine: (): Promise<MyPoints> => delay({ balance: 1280, todaySigned: false, logs: [] }),
+    signIn: () => delay({ balance: 1290, change: 10, gain: 10, streak: 1 }),
+  },
+
+  promotionApi: {
+    active: (): Promise<ActivePromotion[]> =>
+      delay([
+        {
+          id: 1,
+          name: '满 199 减 20',
+          type: 1,
+          endTime: '',
+          thresholds: [
+            { amount: 199, reduce: 20 },
+            { amount: 499, reduce: 60 },
+          ],
+        },
+      ]),
+  },
+
+  contentApi: {
+    faqGroups: (): Promise<FaqGroup[]> =>
+      delay([
+        {
+          category: '购物指南',
+          items: [
+            {
+              id: 1,
+              category: '购物指南',
+              question: '如何搜索商品？',
+              answer: '在顶部搜索框输入关键词即可。',
+              sort: 1,
+              status: 1,
+              createdAt: '',
+            },
+          ],
+        },
+      ]),
+    logisticsCompanies: (): Promise<LogisticsCompanyItem[]> =>
+      delay([
+        { id: 1, name: '顺丰速运', code: 'SF', phone: '95338', sort: 1, status: 1 },
+        { id: 2, name: '中通快递', code: 'ZTO', phone: '95311', sort: 2, status: 1 },
+      ]),
+  },
+
+  seckillApi: {
+    active: (): Promise<ActiveSeckill[]> =>
+      delay([
+        {
+          id: 1,
+          name: '限时秒杀',
+          startTime: '',
+          endTime: '',
+          endTimestamp: Date.now() + 2 * 60 * 60 * 1000,
+          products: mockProducts.slice(0, 4).map((p, i) => ({
+            id: i + 1,
+            productId: p.id,
+            skuId: p.skus[0]?.id ?? 0,
+            productName: p.name,
+            productImage: p.mainImage,
+            skuSpecText: p.skus[0]?.specText ?? '',
+            originalPrice: p.priceMin,
+            seckillPrice: Math.round(p.priceMin * 0.6 * 100) / 100,
+            remaining: 20,
+            limitPerUser: 2,
+          })),
+        },
+      ]),
+  },
+
+  feedbackApi: {
+    create: (payload: CreateFeedbackPayload): Promise<FeedbackItem> =>
+      delay({
+        id: Date.now(),
+        userId: 1,
+        nickname: '小兔用户',
+        avatar: '',
+        type: payload.type,
+        content: payload.content,
+        images: payload.images ?? [],
+        contact: payload.contact ?? '',
+        orderNo: payload.orderNo ?? '',
+        status: 0,
+        replyContent: '',
+        replyAt: null,
+        replier: '',
+        createdAt: '',
+      }),
+    mine: (): Promise<FeedbackItem[]> => delay([]),
+  },
+
+  configApi: {
+    public: (): Promise<PublicConfig> =>
+      delay({
+        siteName: '小兔鲜',
+        logo: '',
+        slogan: '正品好物 极速送达',
+        servicePhone: '400-000-0000',
+        serviceEmail: 'service@xtx-mall.demo',
+        serviceHours: '每日 9:00 - 22:00',
+      }),
   },
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { addressApi, couponApi, userApi } from '@/api'
-import type { Address, Coupon, Product } from '@/api/types'
+import { addressApi, commentApi, couponApi, pointsApi, refundApi, userApi } from '@/api'
+import type { Address, Coupon, MyComments, MyPoints, Product, Refund } from '@/api/types'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
+import { useAddressStore } from '@/stores/address'
 import ProductCard from '@/components/ProductCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import AddressFormModal from '@/components/AddressFormModal.vue'
@@ -11,23 +12,127 @@ import { formatMoney } from '@/utils/money'
 
 const user = useUserStore()
 const ui = useUiStore()
+const addressStore = useAddressStore()
 
-type Tab = 'profile' | 'address' | 'coupon' | 'favorite' | 'footprint'
+type Tab = 'profile' | 'address' | 'coupon' | 'favorite' | 'footprint' | 'refund' | 'comment' | 'security' | 'points'
 const active = ref<Tab>('profile')
 
 const menus: { key: Tab; label: string; icon: string }[] = [
   { key: 'profile', label: '个人资料', icon: '👤' },
   { key: 'address', label: '收货地址', icon: '📍' },
   { key: 'coupon', label: '我的优惠券', icon: '🎟️' },
+  { key: 'points', label: '我的积分', icon: '⭐' },
   { key: 'favorite', label: '我的收藏', icon: '♥' },
   { key: 'footprint', label: '浏览足迹', icon: '🕓' },
+  { key: 'refund', label: '售后服务', icon: '↩' },
+  { key: 'comment', label: '我的评价', icon: '✎' },
+  { key: 'security', label: '账户安全', icon: '🔒' },
 ]
 
-const addresses = ref<Address[]>([])
+const REFUND_TYPE_TEXT: Record<number, string> = { 1: '仅退款', 2: '退货退款', 3: '换货' }
+const REFUND_STATUS_TEXT: Record<number, string> = { 0: '待审核', 1: '已同意', 2: '已拒绝', 3: '已退款' }
+
+const addresses = computed(() => addressStore.list)
 const showAddressModal = ref(false)
+const editingAddress = ref<Address | null>(null)
+const deletingId = ref<number | null>(null)
 const coupons = ref<Coupon[]>([])
 const favorites = ref<Product[]>([])
 const footprints = ref<Product[]>([])
+const refunds = ref<Refund[]>([])
+const myComments = ref<MyComments>({ pending: [], done: [] })
+
+/* 积分 */
+const myPoints = ref<MyPoints>({ balance: 0, todaySigned: false, logs: [] })
+const signingIn = ref(false)
+
+const POINTS_TYPE_TEXT: Record<number, string> = { 1: '签到', 2: '消费获得', 3: '积分抵扣', 4: '后台调整' }
+
+async function signIn() {
+  if (signingIn.value || myPoints.value.todaySigned) return
+  signingIn.value = true
+  try {
+    const res = await pointsApi.signIn()
+    ui.toast(`签到成功，获得 ${res.gain} 积分（连续 ${res.streak} 天）`)
+    myPoints.value = await pointsApi.mine()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '签到失败', 'error')
+  } finally {
+    signingIn.value = false
+  }
+}
+
+/* 发布评价 */
+const commentModal = ref(false)
+const commentTarget = ref<{ orderItemId: number; productName: string } | null>(null)
+const commentScore = ref(5)
+const commentContent = ref('')
+const commentAnonymous = ref(false)
+const commentSubmitting = ref(false)
+
+function openComment(item: { orderItemId: number; productName: string }) {
+  commentTarget.value = item
+  commentScore.value = 5
+  commentContent.value = ''
+  commentAnonymous.value = false
+  commentModal.value = true
+}
+
+async function submitComment() {
+  if (!commentTarget.value) return
+  if (!commentContent.value.trim()) {
+    ui.toast('请填写评价内容', 'error')
+    return
+  }
+  commentSubmitting.value = true
+  try {
+    await commentApi.create({
+      orderItemId: commentTarget.value.orderItemId,
+      score: commentScore.value,
+      content: commentContent.value.trim(),
+      isAnonymous: commentAnonymous.value,
+    })
+    ui.toast('评价发布成功')
+    commentModal.value = false
+    myComments.value = await commentApi.mine()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '发布失败', 'error')
+  } finally {
+    commentSubmitting.value = false
+  }
+}
+
+/* 修改密码 */
+const pwdForm = ref({ oldPassword: '', newPassword: '', confirm: '' })
+const pwdSubmitting = ref(false)
+
+async function submitPassword() {
+  if (!pwdForm.value.oldPassword || !pwdForm.value.newPassword) {
+    ui.toast('请填写原密码与新密码', 'error')
+    return
+  }
+  if (pwdForm.value.newPassword.length < 6) {
+    ui.toast('新密码至少 6 位', 'error')
+    return
+  }
+  if (pwdForm.value.newPassword !== pwdForm.value.confirm) {
+    ui.toast('两次输入的新密码不一致', 'error')
+    return
+  }
+  pwdSubmitting.value = true
+  try {
+    await userApi.changePassword({
+      oldPassword: pwdForm.value.oldPassword,
+      newPassword: pwdForm.value.newPassword,
+    })
+    ui.toast('密码已修改')
+    pwdForm.value = { oldPassword: '', newPassword: '', confirm: '' }
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '修改失败', 'error')
+  } finally {
+    pwdSubmitting.value = false
+  }
+}
 
 const form = ref({
   nickname: user.user?.nickname ?? '',
@@ -54,16 +159,21 @@ const uploadingAvatar = ref(false)
 const AVATAR_MAX_SIZE = 2 * 1024 * 1024
 
 onMounted(async () => {
-  const [a, c, fav, fp] = await Promise.all([
-    addressApi.list(),
+  const [, c, fav, fp, rf, cm, pt] = await Promise.all([
+    addressStore.load(),
     couponApi.mine(),
     userApi.favorites(),
     userApi.footprints(),
+    refundApi.mine(),
+    commentApi.mine(),
+    pointsApi.mine(),
   ])
-  addresses.value = a
   coupons.value = c
   favorites.value = fav
   footprints.value = fp
+  refunds.value = rf
+  myComments.value = cm
+  myPoints.value = pt
   try {
     await user.loadProfile()
     syncForm()
@@ -118,8 +228,35 @@ async function saveProfile() {
 }
 
 async function onAddressCreated() {
-  addresses.value = await addressApi.list()
+  await addressStore.load()
   ui.toast('收货地址添加成功')
+}
+
+function openCreateAddress() {
+  editingAddress.value = null
+  showAddressModal.value = true
+}
+
+function openEditAddress(address: Address) {
+  editingAddress.value = address
+  showAddressModal.value = true
+}
+
+async function onAddressUpdated() {
+  await addressStore.load()
+  editingAddress.value = null
+  ui.toast('收货地址已更新')
+}
+
+async function removeAddress(address: Address) {
+  try {
+    await addressApi.remove(address.id)
+    await addressStore.load()
+    deletingId.value = null
+    ui.toast('收货地址已删除')
+  } catch (err) {
+    ui.toast(err instanceof Error ? err.message : '删除失败', 'error')
+  }
 }
 
 function couponLabel(c: Coupon): string {
@@ -203,7 +340,7 @@ function couponLabel(c: Coupon): string {
           <template v-else-if="active === 'address'">
             <div class="uc__head">
               <h1 class="uc__title">收货地址</h1>
-              <button class="btn btn-secondary btn-sm" @click="showAddressModal = true">＋ 新增地址</button>
+              <button class="btn btn-secondary btn-sm" @click="openCreateAddress">＋ 新增地址</button>
             </div>
             <div v-if="addresses.length" class="uc-addr-grid">
               <div v-for="a in addresses" :key="a.id" class="uc-addr">
@@ -213,14 +350,19 @@ function couponLabel(c: Coupon): string {
                   <span v-if="a.isDefault" class="tag">默认</span>
                 </div>
                 <p class="muted">{{ a.province }}{{ a.city }}{{ a.district }}{{ a.detail }}</p>
-                <div class="uc-addr__actions">
-                  <button class="link" @click="ui.toast('编辑地址（演示）', 'info')">编辑</button>
-                  <button class="link" @click="ui.toast('删除地址（演示）', 'info')">删除</button>
+                <div v-if="deletingId === a.id" class="uc-addr__actions">
+                  <span class="uc-addr__confirm">确认删除该地址？</span>
+                  <button class="link uc-addr__danger" @click="removeAddress(a)">确认删除</button>
+                  <button class="link" @click="deletingId = null">取消</button>
+                </div>
+                <div v-else class="uc-addr__actions">
+                  <button class="link" @click="openEditAddress(a)">编辑</button>
+                  <button class="link" @click="deletingId = a.id">删除</button>
                 </div>
               </div>
             </div>
             <EmptyState v-else icon="📍" title="还没有收货地址" desc="添加地址后，下单时即可快速选择">
-              <button class="btn btn-primary" @click="showAddressModal = true">＋ 新增地址</button>
+              <button class="btn btn-primary" @click="openCreateAddress">＋ 新增地址</button>
             </EmptyState>
           </template>
 
@@ -249,6 +391,39 @@ function couponLabel(c: Coupon): string {
             </div>
           </template>
 
+          <!-- Points -->
+          <template v-else-if="active === 'points'">
+            <h1 class="uc__title">我的积分</h1>
+
+            <div class="pts-hero">
+              <div>
+                <p class="pts-hero__label">当前积分</p>
+                <b class="pts-hero__value">{{ myPoints.balance }}</b>
+                <p class="pts-hero__tip">消费 1 元得 1 积分，签到可得额外积分</p>
+              </div>
+              <button class="btn btn-primary" :disabled="myPoints.todaySigned || signingIn" @click="signIn">
+                {{ myPoints.todaySigned ? '今日已签到' : signingIn ? '签到中…' : '每日签到' }}
+              </button>
+            </div>
+
+            <p class="muted uc__footprint-date">积分明细</p>
+            <ul v-if="myPoints.logs.length" class="pts-list">
+              <li v-for="l in myPoints.logs" :key="l.id" class="pts-item">
+                <div>
+                  <p>{{ POINTS_TYPE_TEXT[l.type] ?? '积分变动' }}</p>
+                  <p class="muted">{{ l.remark }} · {{ l.createdAt }}</p>
+                </div>
+                <div class="pts-item__right">
+                  <b :class="l.change > 0 ? 'pts-plus' : 'pts-minus'">
+                    {{ l.change > 0 ? '+' : '' }}{{ l.change }}
+                  </b>
+                  <span class="muted">余额 {{ l.balance }}</span>
+                </div>
+              </li>
+            </ul>
+            <EmptyState v-else icon="⭐" title="暂无积分记录" desc="下单完成或每日签到即可获得积分" />
+          </template>
+
           <!-- Favorite -->
           <template v-else-if="active === 'favorite'">
             <h1 class="uc__title">我的收藏</h1>
@@ -256,6 +431,92 @@ function couponLabel(c: Coupon): string {
               <ProductCard v-for="p in favorites" :key="p.id" :product="p" />
             </div>
             <EmptyState v-else icon="♥" title="还没有收藏商品" />
+          </template>
+
+          <!-- Refund -->
+          <template v-else-if="active === 'refund'">
+            <h1 class="uc__title">售后服务</h1>
+            <ul v-if="refunds.length" class="rf-list">
+              <li v-for="r in refunds" :key="r.id" class="rf-item">
+                <div class="rf-item__main">
+                  <p class="rf-item__no">售后单号：{{ r.refundNo }}</p>
+                  <p class="muted">订单号：{{ r.orderNo }} · 申请时间：{{ r.createdAt }}</p>
+                  <p class="rf-item__reason">
+                    {{ REFUND_TYPE_TEXT[r.type] ?? '售后' }} · {{ r.reason }}
+                  </p>
+                  <p v-if="r.auditRemark" class="muted">审核备注：{{ r.auditRemark }}</p>
+                </div>
+                <div class="rf-item__right">
+                  <b class="rf-item__amount">¥{{ formatMoney(r.amount) }}</b>
+                  <span class="rf-item__status" :class="`is-${r.status}`">{{ REFUND_STATUS_TEXT[r.status] }}</span>
+                </div>
+              </li>
+            </ul>
+            <EmptyState v-else icon="↩" title="暂无售后记录" desc="订单有问题可前往订单详情申请售后" />
+          </template>
+
+          <!-- Comment -->
+          <template v-else-if="active === 'comment'">
+            <h1 class="uc__title">我的评价</h1>
+
+            <template v-if="myComments.pending.length">
+              <p class="muted uc__footprint-date">待评价（{{ myComments.pending.length }}）</p>
+              <ul class="cm-list">
+                <li v-for="p in myComments.pending" :key="p.orderItemId" class="cm-item">
+                  <img :src="p.productImage" :alt="p.productName" />
+                  <div class="cm-item__info">
+                    <p class="cm-item__name">{{ p.productName }}</p>
+                    <p class="muted">{{ p.skuSpecText }} · 订单 {{ p.orderNo }}</p>
+                  </div>
+                  <button class="btn btn-primary btn-sm" @click="openComment(p)">去评价</button>
+                </li>
+              </ul>
+            </template>
+
+            <p v-if="myComments.done.length" class="muted uc__footprint-date">已评价（{{ myComments.done.length }}）</p>
+            <ul v-if="myComments.done.length" class="cm-list">
+              <li v-for="c in myComments.done" :key="c.id" class="cm-item cm-item--done">
+                <img :src="c.productImage" :alt="c.productName" />
+                <div class="cm-item__info">
+                  <p class="cm-item__name">{{ c.productName }}</p>
+                  <p class="cm-stars">{{ '★'.repeat(c.score) }}<span class="muted">{{ '☆'.repeat(5 - c.score) }}</span></p>
+                  <p class="cm-item__content">{{ c.content }}</p>
+                  <p v-if="c.replyContent" class="muted">商家回复：{{ c.replyContent }}</p>
+                  <p class="muted">{{ c.createdAt }}</p>
+                </div>
+              </li>
+            </ul>
+
+            <EmptyState
+              v-if="!myComments.pending.length && !myComments.done.length"
+              icon="✎"
+              title="暂无评价记录"
+              desc="订单完成后即可评价商品"
+            />
+          </template>
+
+          <!-- Security -->
+          <template v-else-if="active === 'security'">
+            <h1 class="uc__title">账户安全</h1>
+            <div class="sec-card">
+              <h3>修改密码</h3>
+              <p class="muted">为保障账户安全，建议定期更换密码</p>
+              <div class="sec-field">
+                <label>原密码</label>
+                <input v-model="pwdForm.oldPassword" type="password" placeholder="请输入原密码" />
+              </div>
+              <div class="sec-field">
+                <label>新密码</label>
+                <input v-model="pwdForm.newPassword" type="password" placeholder="至少 6 位" />
+              </div>
+              <div class="sec-field">
+                <label>确认新密码</label>
+                <input v-model="pwdForm.confirm" type="password" placeholder="再次输入新密码" />
+              </div>
+              <button class="btn btn-primary" :disabled="pwdSubmitting" @click="submitPassword">
+                {{ pwdSubmitting ? '提交中…' : '确认修改' }}
+              </button>
+            </div>
           </template>
 
           <!-- Footprint -->
@@ -271,7 +532,47 @@ function couponLabel(c: Coupon): string {
       </div>
     </div>
 
-    <AddressFormModal v-model="showAddressModal" @created="onAddressCreated" />
+    <AddressFormModal
+      v-model="showAddressModal"
+      :address="editingAddress"
+      @created="onAddressCreated"
+      @updated="onAddressUpdated"
+    />
+
+    <div v-if="commentModal" class="cm-mask" @click.self="commentModal = false">
+      <div class="cm-modal card">
+        <h2 class="cm-modal__title">发表评价</h2>
+        <p class="muted">{{ commentTarget?.productName }}</p>
+
+        <p class="cm-modal__label">评分</p>
+        <div class="cm-stars-input">
+          <button
+            v-for="s in [1, 2, 3, 4, 5]"
+            :key="s"
+            class="cm-star"
+            :class="{ 'is-on': s <= commentScore }"
+            @click="commentScore = s"
+          >
+            ★
+          </button>
+        </div>
+
+        <p class="cm-modal__label">评价内容</p>
+        <textarea v-model="commentContent" class="cm-textarea" rows="4" placeholder="分享你的使用体验吧" />
+
+        <label class="cm-anon">
+          <input v-model="commentAnonymous" type="checkbox" />
+          匿名评价
+        </label>
+
+        <div class="cm-modal__actions">
+          <button class="btn btn-secondary" @click="commentModal = false">取消</button>
+          <button class="btn btn-primary" :disabled="commentSubmitting" @click="submitComment">
+            {{ commentSubmitting ? '提交中…' : '发布评价' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -460,6 +761,14 @@ function couponLabel(c: Coupon): string {
   border: none;
   font-size: 13px;
 }
+.uc-addr__confirm {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.uc-addr__danger {
+  color: var(--amz-price);
+  font-weight: 700;
+}
 
 .uc-coupons {
   display: flex;
@@ -527,5 +836,266 @@ function couponLabel(c: Coupon): string {
   .uc-coupon > button {
     display: none;
   }
+}
+
+.rf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.rf-item__no {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.rf-item__reason {
+  font-size: 13px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+}
+.rf-item__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.rf-item__amount {
+  color: var(--amz-price);
+  font-size: 16px;
+}
+.rf-item__status {
+  font-size: 13px;
+  font-weight: 700;
+}
+.rf-item__status.is-0 {
+  color: var(--amz-price);
+}
+.rf-item__status.is-1 {
+  color: var(--amz-success);
+}
+.rf-item__status.is-2 {
+  color: #c0392b;
+}
+.rf-item__status.is-3 {
+  color: var(--amz-success);
+}
+
+.cm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.cm-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.cm-item--done {
+  align-items: flex-start;
+}
+.cm-item img {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.cm-item__info {
+  flex: 1;
+  min-width: 0;
+}
+.cm-item__name {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.cm-item__content {
+  font-size: 13px;
+  margin: 6px 0 4px;
+}
+.cm-stars {
+  color: var(--amz-orange);
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+.cm-stars .muted {
+  color: var(--border);
+}
+
+.sec-card {
+  max-width: 420px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+.sec-card h3 {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+.sec-field {
+  margin-top: 14px;
+}
+.sec-field label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+.sec-field input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+  outline: none;
+}
+.sec-field input:focus {
+  border-color: var(--amz-orange);
+}
+.sec-card > .btn {
+  margin-top: 20px;
+}
+
+.cm-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+.cm-modal {
+  width: 100%;
+  max-width: 440px;
+  padding: 22px;
+}
+.cm-modal__title {
+  font-size: 19px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+.cm-modal__label {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 16px 0 8px;
+}
+.cm-stars-input {
+  display: flex;
+  gap: 6px;
+}
+.cm-star {
+  border: none;
+  background: none;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.cm-star.is-on {
+  color: var(--amz-orange);
+}
+.cm-textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+.cm-textarea:focus {
+  border-color: var(--amz-orange);
+}
+.cm-anon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-top: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.cm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.pts-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: linear-gradient(120deg, #fff4e6, #ffe8cc);
+  border-radius: 12px;
+  padding: 24px 26px;
+  margin-bottom: 22px;
+}
+.pts-hero__label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.pts-hero__value {
+  font-size: 34px;
+  font-weight: 900;
+  color: var(--amz-price);
+  line-height: 1.1;
+}
+.pts-hero__tip {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+.pts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pts-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.pts-item p:first-child {
+  font-size: 14px;
+}
+.pts-item__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.pts-item__right b {
+  font-size: 16px;
+}
+.pts-plus {
+  color: var(--amz-success);
+}
+.pts-minus {
+  color: #c0392b;
 }
 </style>

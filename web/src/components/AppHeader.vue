@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { categoryApi } from '@/api'
-import type { Category } from '@/api/types'
+import { categoryApi, configApi } from '@/api'
+import type { Category, PublicConfig } from '@/api/types'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { useUiStore } from '@/stores/ui'
+import { useAddressStore } from '@/stores/address'
 
 const router = useRouter()
 const route = useRoute()
@@ -14,6 +15,7 @@ const cart = useCartStore()
 const user = useUserStore()
 const app = useAppStore()
 const ui = useUiStore()
+const addressStore = useAddressStore()
 
 const keyword = ref((route.query.keyword as string) ?? '')
 const scope = ref('all')
@@ -22,8 +24,37 @@ const childrenMap = ref<Record<number, Category[]>>({})
 const showDept = ref(false)
 const showAccount = ref(false)
 const showSearchPanel = ref(false)
+const siteConfig = ref<PublicConfig | null>(null)
+
+const deliveryText = computed(() => {
+  const a = addressStore.defaultAddress
+  if (!a) return '请选择收货地址'
+  return [a.city, a.district].filter(Boolean).join(' ') || a.province || '请选择收货地址'
+})
+
+async function loadDeliveryAddress() {
+  if (!user.isLoggedIn) {
+    addressStore.clear()
+    return
+  }
+  try {
+    await addressStore.load()
+  } catch {
+    addressStore.clear()
+  }
+}
 
 onMounted(async () => {
+  loadDeliveryAddress()
+  // 站点信息来自后台「系统配置」
+  configApi
+    .public()
+    .then((c) => {
+      siteConfig.value = c
+    })
+    .catch(() => {
+      siteConfig.value = null
+    })
   const all = await categoryApi.tree()
   tops.value = all.filter((c) => c.level === 1)
   childrenMap.value = all.reduce<Record<number, Category[]>>((acc, c) => {
@@ -31,6 +62,8 @@ onMounted(async () => {
     return acc
   }, {})
 })
+
+watch(() => user.isLoggedIn, loadDeliveryAddress)
 
 const cartLabel = computed(() => (cart.count > 0 ? `购物车 ${cart.count}` : '购物车'))
 
@@ -69,16 +102,17 @@ function logout() {
     <!-- Top row -->
     <div class="hdr__top">
       <div class="container hdr__top-inner">
-        <router-link to="/" class="hdr__logo" aria-label="小兔鲜首页">
-          <span class="hdr__logo-mark">🐰</span>
-          <span class="hdr__logo-text">小兔鲜</span>
+        <router-link to="/" class="hdr__logo" :aria-label="`${siteConfig?.siteName || '小兔鲜'}首页`">
+          <img v-if="siteConfig?.logo" :src="siteConfig.logo" class="hdr__logo-img" alt="" />
+          <span v-else class="hdr__logo-mark">🐰</span>
+          <span class="hdr__logo-text">{{ siteConfig?.siteName || '小兔鲜' }}</span>
         </router-link>
 
-        <button class="hdr__deliver" type="button">
+        <button class="hdr__deliver" type="button" @click="router.push(user.isLoggedIn ? '/user' : '/login')">
           <span class="hdr__deliver-pin">📍</span>
           <span class="hdr__deliver-copy">
             <small>送至</small>
-            <b>湛江 赤坎区</b>
+            <b>{{ deliveryText }}</b>
           </span>
         </button>
 
@@ -221,6 +255,10 @@ function logout() {
           {{ c.name }}
         </router-link>
 
+        <router-link to="/seckill" class="hdr__sub-link">限时秒杀</router-link>
+        <router-link to="/coupons" class="hdr__sub-link">领券中心</router-link>
+        <router-link to="/help" class="hdr__sub-link">帮助中心</router-link>
+
         <span class="hdr__sub-promo">新人首单立减 ¥88</span>
       </div>
     </nav>
@@ -258,6 +296,12 @@ function logout() {
 }
 .hdr__logo-mark {
   font-size: 24px;
+}
+.hdr__logo-img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 6px;
 }
 .hdr__logo-text {
   font-size: 22px;
