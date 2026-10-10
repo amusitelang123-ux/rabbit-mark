@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { productApi } from '@/api'
+import { productApi, userApi } from '@/api'
 import type { CommentItem, Product } from '@/api/types'
 import PriceTag from '@/components/PriceTag.vue'
 import StarRating from '@/components/StarRating.vue'
@@ -110,6 +110,22 @@ async function addToCart(silent = false): Promise<boolean> {
 
 async function buyNow() {
   if (await addToCart(true)) router.push('/checkout')
+}
+
+async function toggleFavorite() {
+  if (!product.value) return
+  if (!user.isLoggedIn) {
+    ui.toast('请先登录后再收藏', 'info')
+    router.push({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+  try {
+    const res = await userApi.toggleFavorite(product.value.id)
+    favorited.value = res.favorited
+    ui.toast(res.favorited ? '已加入收藏' : '已取消收藏')
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '操作失败', 'error')
+  }
 }
 
 async function load(id: number) {
@@ -251,7 +267,7 @@ watch(
               立即购买
             </button>
             <div class="pd__buy-actions">
-              <button @click="favorited = !favorited">
+              <button @click="toggleFavorite">
                 {{ favorited ? '♥ 已收藏' : '♡ 收藏' }}
               </button>
               <button @click="ui.toast('链接已复制（演示）', 'info')">分享</button>

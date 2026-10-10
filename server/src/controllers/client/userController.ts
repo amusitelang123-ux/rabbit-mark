@@ -33,6 +33,16 @@ export const updateProfile = asyncHandler(async (req: Request, res: Response) =>
   sendOk(res, await userService.updateProfile(req.auth!.uid, input), '资料已更新')
 })
 
+const passwordSchema = z.object({
+  oldPassword: z.string().min(1, '请输入原密码'),
+  newPassword: z.string().min(6, '新密码至少 6 位').max(50),
+})
+
+export const changePassword = asyncHandler(async (req: Request, res: Response) => {
+  const input = passwordSchema.parse(req.body)
+  sendOk(res, await userService.changePassword(req.auth!.uid, input), '密码已修改')
+})
+
 export const uploadAvatar = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw new AppError('请选择要上传的图片')
   const url = toUploadUrl('avatars', req.file.filename)
@@ -62,8 +72,11 @@ export const favorites = asyncHandler(async (req: Request, res: Response) => {
   sendOk(res, await userService.listFavorites(req.auth!.uid))
 })
 
+const favoriteSchema = z.object({ productId: z.number().int().positive() })
+
 export const toggleFavorite = asyncHandler(async (req: Request, res: Response) => {
-  sendOk(res, await userService.toggleFavorite(req.auth!.uid, toInt(req.params.productId, 0)))
+  const { productId } = favoriteSchema.parse(req.body)
+  sendOk(res, await userService.toggleFavorite(req.auth!.uid, productId))
 })
 
 export const footprints = asyncHandler(async (req: Request, res: Response) => {

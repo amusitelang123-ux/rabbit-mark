@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { userApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
@@ -43,18 +44,46 @@ async function submit() {
     ui.toast('请输入账号和密码', 'error')
     return
   }
+  if (!captchaCode.value) {
+    ui.toast('请输入图形验证码', 'error')
+    return
+  }
   loading.value = true
   try {
-    await user.login(account.value, password.value)
+    await user.login(account.value, password.value, {
+      captchaId: captchaId.value,
+      captchaCode: captchaCode.value,
+    })
     await cart.load()
     ui.toast('登录成功，欢迎回来')
     router.replace((route.query.redirect as string) || '/')
   } catch (err) {
     ui.toast(err instanceof Error ? err.message : '登录失败', 'error')
+    // 验证码一次性消费，失败后必须刷新
+    await refreshCaptcha()
   } finally {
     loading.value = false
   }
 }
+
+/* 图形验证码（U-41 防爆破） */
+const captchaId = ref('')
+const captchaImage = ref('')
+const captchaCode = ref('')
+
+async function refreshCaptcha() {
+  captchaCode.value = ''
+  try {
+    const res = await userApi.captcha()
+    captchaId.value = res.captchaId
+    captchaImage.value = res.image
+  } catch {
+    captchaId.value = ''
+    captchaImage.value = ''
+  }
+}
+
+onMounted(refreshCaptcha)
 </script>
 
 <template>
@@ -85,6 +114,30 @@ async function submit() {
             <label for="password">密码</label>
             <input id="password" v-model="password" type="password" class="input" placeholder="请输入密码" />
           </div>
+          <div class="field">
+            <label for="captcha">图形验证码</label>
+            <div class="code-row">
+              <input
+                id="captcha"
+                v-model="captchaCode"
+                class="input"
+                placeholder="请输入右侧字符"
+                maxlength="6"
+                autocomplete="off"
+              />
+              <img
+                v-if="captchaImage"
+                class="captcha-img"
+                :src="captchaImage"
+                alt="图形验证码"
+                title="点击刷新"
+                @click="refreshCaptcha"
+              />
+              <button v-else type="button" class="btn btn-secondary code-row__btn" @click="refreshCaptcha">
+                获取
+              </button>
+            </div>
+          </div>
         </form>
 
         <form v-else @submit.prevent="submit">
@@ -110,7 +163,7 @@ async function submit() {
         <p class="auth-card__demo">演示账号：user1 ~ user20，密码均为 123456</p>
 
         <div class="auth-card__links">
-          <a href="javascript:void(0)" class="link">忘记密码</a>
+          <router-link to="/forgot" class="link">忘记密码</router-link>
           <router-link to="/register" class="link">免费注册</router-link>
         </div>
 
@@ -209,6 +262,15 @@ async function submit() {
 }
 .code-row__btn {
   white-space: nowrap;
+}
+.captcha-img {
+  width: 120px;
+  height: 40px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: block;
 }
 .auth-card__submit {
   margin-top: 6px;

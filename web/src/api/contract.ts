@@ -8,7 +8,20 @@ import type {
   Coupon,
   Order,
   PageResult,
+  PayChannel,
+  PayStatusResult,
+  PrepayResult,
   Product,
+  MyComment,
+  MyComments,
+  MyPoints,
+  ActivePromotion,
+  FaqGroup,
+  LogisticsCompanyItem,
+  ActiveSeckill,
+  FeedbackItem,
+  PublicConfig,
+  Refund,
   SeckillProduct,
   UserInfo,
 } from './types'
@@ -74,6 +87,17 @@ export interface CartAddPayload {
   quantity: number
 }
 
+export interface PrepayPayload {
+  orderNo: string
+  channel: PayChannel
+}
+
+export interface SandboxPayPayload {
+  payNo: string
+  amount: number
+  sandboxToken: string
+}
+
 /** 用户端 API 契约：Mock 与真实后端都实现该接口 */
 export interface ClientApi {
   categoryApi: {
@@ -96,6 +120,7 @@ export interface ClientApi {
   couponApi: {
     center(): Promise<Coupon[]>
     mine(): Promise<Coupon[]>
+    receive(id: number): Promise<{ id: number; couponId: number }>
   }
   orderApi: {
     list(status?: number): Promise<Order[]>
@@ -111,11 +136,19 @@ export interface ClientApi {
     remove(id: number): Promise<void>
   }
   userApi: {
-    login(account: string, password: string): Promise<LoginResult>
+    login(
+      account: string,
+      password: string,
+      captcha?: { captchaId: string; captchaCode: string },
+    ): Promise<LoginResult>
+    captcha(): Promise<{ captchaId: string; image: string; expireIn: number }>
     register(payload: RegisterPayload): Promise<LoginResult>
     profile(): Promise<UserInfo>
     updateProfile(patch: ProfilePatch): Promise<UserInfo>
     uploadAvatar(file: File): Promise<UserInfo>
+    changePassword(payload: { oldPassword: string; newPassword: string }): Promise<{ changed: boolean }>
+    sendSmsCode(phone: string): Promise<{ phone: string; code: string }>
+    resetPassword(payload: { phone: string; code: string; newPassword: string }): Promise<{ reset: boolean }>
     favorites(): Promise<Product[]>
     toggleFavorite(productId: number): Promise<{ favorited: boolean }>
     footprints(): Promise<Product[]>
@@ -127,4 +160,64 @@ export interface ClientApi {
     selectAll(selected: boolean): Promise<CartItem[]>
     remove(ids: number[]): Promise<CartItem[]>
   }
+  paymentApi: {
+    prepay(payload: PrepayPayload): Promise<PrepayResult>
+    status(payNo: string): Promise<PayStatusResult>
+    /** 沙箱支付：直接向回调地址提交支付结果，模拟网关异步通知 */
+    sandboxPay(payload: SandboxPayPayload): Promise<void>
+  }
+  refundApi: {
+    apply(payload: ApplyRefundPayload): Promise<Refund>
+    mine(): Promise<Refund[]>
+  }
+  commentApi: {
+    mine(): Promise<MyComments>
+    create(payload: CreateCommentPayload): Promise<MyComment>
+  }
+  pointsApi: {
+    mine(): Promise<MyPoints>
+    signIn(): Promise<{ balance: number; change: number; gain: number; streak: number }>
+  }
+  promotionApi: {
+    active(): Promise<ActivePromotion[]>
+  }
+  contentApi: {
+    faqGroups(): Promise<FaqGroup[]>
+    logisticsCompanies(): Promise<LogisticsCompanyItem[]>
+  }
+  seckillApi: {
+    active(): Promise<ActiveSeckill[]>
+  }
+  feedbackApi: {
+    create(payload: CreateFeedbackPayload): Promise<FeedbackItem>
+    mine(): Promise<FeedbackItem[]>
+  }
+  configApi: {
+    public(): Promise<PublicConfig>
+  }
+}
+
+export interface CreateFeedbackPayload {
+  type: number
+  content: string
+  images?: string[]
+  contact?: string
+  orderNo?: string
+}
+
+export interface CreateCommentPayload {
+  orderItemId: number
+  score: number
+  content: string
+  images?: string[]
+  isAnonymous?: boolean
+}
+
+export interface ApplyRefundPayload {
+  orderNo: string
+  orderItemId?: number
+  type: number
+  reason: string
+  amount?: number
+  images?: string[]
 }

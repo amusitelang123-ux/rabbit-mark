@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { configApi } from '@/api'
+import type { PublicConfig } from '@/api/types'
+
 const columns = [
   { title: '了解我们', links: ['关于小兔鲜', '加入我们', '品牌故事', '联系方式'] },
   { title: '购物指南', links: ['购物流程', '会员介绍', '常见问题', '联系客服'] },
@@ -6,9 +10,20 @@ const columns = [
   { title: '售后服务', links: ['退换货政策', '退款说明', '取消订单', '价格保护'] },
 ]
 
+/** 站点信息来自后台「系统配置」，避免与帮助中心出现两套客服电话 */
+const config = ref<PublicConfig | null>(null)
+
 function toTop() {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
+
+onMounted(async () => {
+  try {
+    config.value = await configApi.public()
+  } catch {
+    config.value = null
+  }
+})
 </script>
 
 <template>
@@ -23,9 +38,10 @@ function toTop() {
           </ul>
         </div>
         <div class="ftr__col ftr__brand">
-          <h4>小兔鲜 · 平台自营</h4>
-          <p>正品保障 · 极速配送 · 售后无忧</p>
-          <p class="ftr__hotline">客服热线 400-888-8888</p>
+          <h4>{{ config?.siteName || '小兔鲜' }} · 平台自营</h4>
+          <p>{{ config?.slogan || '正品保障 · 极速配送 · 售后无忧' }}</p>
+          <p v-if="config?.servicePhone" class="ftr__hotline">客服热线 {{ config.servicePhone }}</p>
+          <p v-if="config?.serviceHours" class="ftr__hotline">{{ config.serviceHours }}</p>
           <div class="ftr__pays">
             <span>微信支付</span><span>支付宝</span><span>余额</span><span>沙箱</span>
           </div>
@@ -34,7 +50,7 @@ function toTop() {
     </div>
     <div class="ftr__bottom">
       <div class="container">
-        <p>© 2026 小兔鲜电商 XiaoTuXian Mall · 仅用于教学演示，非真实交易平台</p>
+        <p>© 2026 {{ config?.siteName || '小兔鲜' }}电商 XiaoTuXian Mall · 仅用于教学演示，非真实交易平台</p>
         <p>粤ICP备00000000号 · 增值电信业务经营许可证</p>
       </div>
     </div>

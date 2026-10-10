@@ -7,6 +7,7 @@ import { ORDER_STATUS_TEXT, ORDER_TABS } from '@/constants/order'
 import { useUiStore } from '@/stores/ui'
 import EmptyState from '@/components/EmptyState.vue'
 import PriceTag from '@/components/PriceTag.vue'
+import PayDialog from './components/PayDialog.vue'
 
 const router = useRouter()
 const ui = useUiStore()
@@ -14,6 +15,8 @@ const ui = useUiStore()
 const orders = ref<Order[]>([])
 const loading = ref(true)
 const active = ref<number | 'all'>('all')
+const payVisible = ref(false)
+const payOrder = ref<Order | null>(null)
 
 const tabs = ORDER_TABS
 
@@ -35,14 +38,41 @@ async function load() {
 
 function act(order: Order, action: string) {
   if (action === '去支付') {
-    ui.toast('跳转支付（演示）', 'info')
+    payOrder.value = order
+    payVisible.value = true
     return
   }
   if (action === '查看详情') {
     router.push(`/order/${order.orderNo}`)
     return
   }
+  if (action === '取消订单') {
+    void runOrderOp(() => orderApi.cancel(order.orderNo), '订单已取消')
+    return
+  }
+  if (action === '确认收货') {
+    void runOrderOp(() => orderApi.confirm(order.orderNo), '已确认收货')
+    return
+  }
+  if (action === '提醒发货') {
+    ui.toast('已提醒商家尽快发货', 'success')
+    return
+  }
   ui.toast(`${action}（演示）`, 'info')
+}
+
+async function runOrderOp(op: () => Promise<unknown>, successMsg: string) {
+  try {
+    await op()
+    ui.toast(successMsg, 'success')
+    await load()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '操作失败', 'error')
+  }
+}
+
+function onPaid() {
+  load()
 }
 
 function actionsFor(status: number): string[] {
@@ -130,6 +160,13 @@ onMounted(load)
           <router-link to="/" class="btn btn-primary">去逛逛</router-link>
         </EmptyState>
       </div>
+
+      <PayDialog
+        v-model="payVisible"
+        :order-no="payOrder?.orderNo ?? ''"
+        :amount="payOrder?.payAmount ?? 0"
+        @paid="onPaid"
+      />
     </div>
   </div>
 </template>

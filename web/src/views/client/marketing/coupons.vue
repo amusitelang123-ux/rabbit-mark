@@ -14,9 +14,15 @@ function label(c: Coupon): string {
   return c.type === 1 ? `¥${c.amount}` : `${(c.discountRate * 10).toFixed(1)}折`
 }
 
-function receive(c: Coupon) {
-  received.value = new Set([...received.value, c.id])
-  ui.toast(`已领取「${c.name}」`)
+async function receive(c: Coupon) {
+  if (received.value.has(c.id)) return
+  try {
+    await couponApi.receive(c.id)
+    received.value = new Set([...received.value, c.id])
+    ui.toast(`已领取「${c.name}」`)
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '领取失败', 'error')
+  }
 }
 
 onMounted(async () => {

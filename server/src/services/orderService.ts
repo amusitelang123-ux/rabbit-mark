@@ -1,11 +1,13 @@
-import { Op } from 'sequelize'
+import { Op, type WhereOptions } from 'sequelize'
 import { sequelize } from '../config/database'
 import {
   Cart,
   Coupon,
+  FinanceRecord,
   InventoryLog,
   Order,
   OrderItem,
+  OrderLog,
   OrderLogistics,
   Product,
   ProductSku,
@@ -13,14 +15,22 @@ import {
   UserCoupon,
 } from '../models'
 import { AppError } from '../utils/errors'
-import { ERR, ORDER_STATUS } from '../constants'
+import { ERR, FINANCE_TYPE, INVENTORY_TYPE, ORDER_STATUS } from '../constants'
 import { generateNo, round2 } from '../utils/helpers'
-import { toOrderDto } from '../utils/serializers'
+import { syncProductAggregate } from '../utils/productAggregate'
+import { writeOrderLog } from '../utils/orderLog'
+import { calcPromotionDiscount } from './promotionService'
+import { calcFreight } from './contentService'
+import { awardForOrder } from './pointsService'
+import { releaseSeckill, reserveSeckill } from './seckillService'
+import { formatDate, toOrderDto } from '../utils/serializers'
 
 const orderInclude = [
   { model: OrderItem, as: 'items' },
   { model: OrderLogistics, as: 'logistics' },
 ]
+
+/** 详情查询才带上操作日志，列表查询不带（避免 N+1 与响应膨胀） */
 
 interface CreateOrderInput {
   addressId?: number
@@ -47,32 +57,64 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
       : await UserAddress.findOne({ where: { userId }, order: [['isDefault', 'DESC']], transaction })
     if (!address) throw new AppError('请先选择收货地址', ERR.PARAM)
 
+    // 促销叠加顺序（企划 3.1.5）：商品原价 → 秒杀价 → 满减 → 优惠券 → 运费
+    let originalTotal = 0
     let goodsTotal = 0
     const snapshots: {
       product: Product | null
       sku: ProductSku | null
       quantity: number
+      originalSubtotal: number
       subtotal: number
+      seckillProductId: number | null
     }[] = []
 
     for (const row of cartRows) {
       const product = row.get('product') as Product | null
-      const sku = row.get('sku') as ProductSku | null
-      if (!product || !sku || product.status !== 1 || sku.status !== 1) {
+      const cartSku = row.get('sku') as ProductSku | null
+      if (!product || !cartSku || product.status !== 1 || cartSku.status !== 1) {
         throw new AppError(`商品「${product?.name ?? ''}」已下架`, ERR.PRODUCT_OFF_SHELF)
       }
+      // 显式对 SKU 行加锁，避免不同用户购物车并发下单造成超卖
+      const sku = await ProductSku.findByPk(cartSku.id, { transaction, lock: transaction.LOCK.UPDATE })
+      if (!sku) throw new AppError(`「${product.name}」库存不足`, ERR.STOCK_NOT_ENOUGH)
       const available = sku.stock - sku.lockedStock
       if (available < row.quantity) {
         throw new AppError(`「${product.name}」库存不足`, ERR.STOCK_NOT_ENOUGH)
       }
-      const subtotal = round2(Number(sku.price) * row.quantity)
+
+      // 第 2 环：秒杀价（同事务行锁预扣秒杀库存，并校验每人限购）
+      const seckill = await reserveSeckill(
+        userId,
+        Number(product.id),
+        Number(sku.id),
+        row.quantity,
+        transaction,
+      )
+      const originalSubtotal = round2(Number(sku.price) * row.quantity)
+      const unitPrice = seckill ? seckill.seckillPrice : Number(sku.price)
+      const subtotal = round2(unitPrice * row.quantity)
+
+      originalTotal += originalSubtotal
       goodsTotal += subtotal
-      snapshots.push({ product, sku, quantity: row.quantity, subtotal })
+      snapshots.push({
+        product,
+        sku,
+        quantity: row.quantity,
+        originalSubtotal,
+        subtotal,
+        seckillProductId: seckill?.seckillProductId ?? null,
+      })
     }
+    originalTotal = round2(originalTotal)
     goodsTotal = round2(goodsTotal)
+    /** 第 2 环快照：秒杀让利 = 原价总额 - 秒杀后商品额 */
+    const seckillAmount = round2(originalTotal - goodsTotal)
 
-    const freightAmount = goodsTotal >= 99 ? 0 : 8
+    // 第 5 环：运费取自后台运费模板（默认模板），未配置时回退内置规则
+    const freightAmount = await calcFreight(goodsTotal, transaction)
 
+    // 第 4 环：优惠券（门槛按秒杀后商品额判定）
     let couponAmount = 0
     let userCoupon: UserCoupon | null = null
     if (input.couponId) {
@@ -91,15 +133,22 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
           : round2(goodsTotal * (1 - Number(coupon.discountRate)))
     }
 
-    const payAmount = round2(goodsTotal + freightAmount - couponAmount)
+    // 第 3 环：满减活动，按秒杀后商品额匹配最优档位
+    const promotion = await calcPromotionDiscount(goodsTotal, transaction)
+    const promotionAmount = promotion.discount
+
+    const discountAmount = round2(seckillAmount + promotionAmount + couponAmount)
+    const payAmount = round2(Math.max(0, originalTotal + freightAmount - discountAmount))
 
     const order = await Order.create(
       {
         orderNo: generateNo('XTX'),
         userId,
         status: ORDER_STATUS.PENDING_PAY,
-        totalAmount: goodsTotal.toFixed(2),
-        discountAmount: couponAmount.toFixed(2),
+        totalAmount: originalTotal.toFixed(2),
+        discountAmount: discountAmount.toFixed(2),
+        seckillAmount: seckillAmount.toFixed(2),
+        promotionAmount: promotionAmount.toFixed(2),
         couponAmount: couponAmount.toFixed(2),
         freightAmount: freightAmount.toFixed(2),
         payAmount: payAmount.toFixed(2),
@@ -114,7 +163,7 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
     )
 
     for (const snap of snapshots) {
-      const { product, sku, quantity, subtotal } = snap
+      const { product, sku, quantity, originalSubtotal, subtotal, seckillProductId } = snap
       if (!product || !sku) continue
       await OrderItem.create(
         {
@@ -124,9 +173,12 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
           productName: product.name,
           skuSpecText: sku.specText ?? '',
           productImage: sku.image ?? product.mainImage ?? '',
-          price: sku.price,
+          price: quantity ? (subtotal / quantity).toFixed(2) : sku.price,
+          originalPrice: quantity ? (originalSubtotal / quantity).toFixed(2) : sku.price,
+          seckillProductId,
           quantity,
           subtotal: subtotal.toFixed(2),
+          discountAmount: round2(originalSubtotal - subtotal).toFixed(2),
         },
         { transaction },
       )
@@ -154,6 +206,14 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
       await userCoupon.save({ transaction })
     }
 
+    await writeOrderLog(
+      Number(order.id),
+      'create',
+      `user:${userId}`,
+      `提交订单，应付 ¥${payAmount.toFixed(2)}`,
+      transaction,
+    )
+
     await Cart.destroy({ where: { userId, selected: 1 }, transaction })
 
     const full = await Order.findByPk(order.id, { include: orderInclude, transaction })
@@ -168,10 +228,36 @@ export async function listOrders(userId: number, status?: number) {
   return rows.map((o) => toOrderDto(o as unknown as Parameters<typeof toOrderDto>[0]))
 }
 
-/** 管理端订单列表（不限定用户） */
-export async function listAllOrders(status?: number, page = 1, pageSize = 10) {
-  const where: Record<string, unknown> = {}
-  if (status) where.status = status
+export interface AdminOrderQuery {
+  orderNo?: string
+  userId?: number
+  status?: number
+  startTime?: string
+  endTime?: string
+  page?: number
+  pageSize?: number
+}
+
+function buildAdminOrderWhere(query: AdminOrderQuery): WhereOptions {
+  const conditions: WhereOptions[] = []
+  if (query.status) conditions.push({ status: query.status })
+  if (query.userId) conditions.push({ userId: query.userId })
+  if (query.orderNo) conditions.push({ orderNo: { [Op.like]: `%${query.orderNo}%` } } as WhereOptions)
+  if (query.startTime || query.endTime) {
+    const range: { [Op.gte]?: Date; [Op.lte]?: Date } = {}
+    if (query.startTime) range[Op.gte] = new Date(query.startTime)
+    if (query.endTime) range[Op.lte] = new Date(query.endTime)
+    conditions.push({ createdAt: range } as WhereOptions)
+  }
+  return conditions.length ? { [Op.and]: conditions } : {}
+}
+
+/** 管理端订单列表（不限定用户，支持多条件筛选） */
+export async function listAllOrders(query: AdminOrderQuery = {}) {
+  const page = Math.max(1, query.page ?? 1)
+  const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 10))
+  const where = buildAdminOrderWhere(query)
+
   const { rows, count } = await Order.findAndCountAll({
     where,
     include: orderInclude,
@@ -189,8 +275,166 @@ export async function listAllOrders(status?: number, page = 1, pageSize = 10) {
   }
 }
 
+/** 导出用：按筛选条件取订单（上限 5000 条） */
+export async function exportOrders(query: AdminOrderQuery = {}) {
+  const where = buildAdminOrderWhere(query)
+  const rows = await Order.findAll({
+    where,
+    include: orderInclude,
+    order: [['id', 'DESC']],
+    limit: 5000,
+  })
+  return rows.map((o) => toOrderDto(o as unknown as Parameters<typeof toOrderDto>[0]))
+}
+
+/** 管理端订单详情（不限用户） */
+export async function getOrderAdmin(orderNo: string) {
+  const order = await Order.findOne({
+    where: { orderNo },
+    include: [...orderInclude, { model: OrderLog, as: 'logs', order: [['id', 'ASC']] }],
+  })
+  if (!order) throw AppError.notFound('订单不存在')
+  return toOrderDto(order as unknown as Parameters<typeof toOrderDto>[0])
+}
+
+/** 后台发货：仅「待发货」订单可发货，写入物流信息并转已发货 */
+export async function shipOrder(
+  orderNo: string,
+  input: { company: string; trackingNo: string; traces?: { time: string; text: string }[] },
+  operator: string,
+) {
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({ where: { orderNo }, transaction, lock: transaction.LOCK.UPDATE })
+    if (!order) throw AppError.notFound('订单不存在')
+    if (order.status !== ORDER_STATUS.PAID) {
+      throw new AppError('当前订单状态不可发货', ERR.ORDER_STATUS_INVALID)
+    }
+    const now = new Date()
+    const traces = input.traces?.length
+      ? input.traces
+      : [{ time: formatDate(now), text: '商品已出库，等待快递揽收' }]
+    const logistics = await OrderLogistics.findOne({ where: { orderId: order.id }, transaction })
+    if (logistics) {
+      logistics.company = input.company
+      logistics.trackingNo = input.trackingNo
+      logistics.status = 1
+      logistics.traces = traces
+      await logistics.save({ transaction })
+    } else {
+      await OrderLogistics.create(
+        {
+          orderId: Number(order.id),
+          company: input.company,
+          trackingNo: input.trackingNo,
+          status: 1,
+          traces,
+        },
+        { transaction },
+      )
+    }
+    order.status = ORDER_STATUS.SHIPPED
+    order.shipTime = now
+    await order.save({ transaction })
+    await writeOrderLog(
+      Number(order.id),
+      'ship',
+      operator,
+      `${input.company} ${input.trackingNo}`,
+      transaction,
+    )
+    const full = await Order.findByPk(order.id, { include: orderInclude, transaction })
+    return toOrderDto(full as unknown as Parameters<typeof toOrderDto>[0])
+  })
+}
+
+/** 批量发货：逐单处理，单笔失败不影响其它（返回失败明细） */
+export async function batchShip(
+  orders: { orderNo: string; company: string; trackingNo: string }[],
+  operator: string,
+) {
+  if (!orders.length) throw new AppError('请先选择订单', ERR.PARAM)
+
+  const succeeded: string[] = []
+  const failed: { orderNo: string; reason: string }[] = []
+
+  for (const item of orders) {
+    try {
+      if (!item.company || !item.trackingNo) throw new Error('缺少物流公司或运单号')
+      await shipOrder(item.orderNo, { company: item.company, trackingNo: item.trackingNo }, operator)
+      succeeded.push(item.orderNo)
+    } catch (e) {
+      failed.push({ orderNo: item.orderNo, reason: e instanceof Error ? e.message : '发货失败' })
+    }
+  }
+
+  if (!succeeded.length) {
+    throw new AppError(
+      `全部 ${orders.length} 笔订单发货失败：${failed[0]?.orderNo} ${failed[0]?.reason}`,
+      ERR.PARAM,
+    )
+  }
+  return { succeeded: succeeded.length, failed }
+}
+
+/** 后台关闭订单：待付款释放锁定库存；已付款回补真实库存并提示线下退款 */export async function closeOrder(orderNo: string, reason: string, operator: string) {
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({ where: { orderNo }, transaction, lock: transaction.LOCK.UPDATE })
+    if (!order) throw AppError.notFound('订单不存在')
+
+    if (order.status === ORDER_STATUS.PENDING_PAY) {
+      await releaseLockedStock(Number(order.id), operator, transaction)
+    } else if (order.status === ORDER_STATUS.PAID) {
+      const items = await OrderItem.findAll({ where: { orderId: order.id }, transaction })
+      for (const item of items) {
+        const sku = await ProductSku.findByPk(item.skuId, { transaction, lock: transaction.LOCK.UPDATE })
+        if (!sku) continue
+        const before = sku.stock
+        sku.stock += item.quantity
+        await sku.save({ transaction })
+        await InventoryLog.create(
+          {
+            skuId: Number(sku.id),
+            type: INVENTORY_TYPE.MANUAL_ADJUST,
+            change: item.quantity,
+            before,
+            after: sku.stock,
+            operator,
+            remark: `后台关单回补库存（订单 ${order.orderNo}）`,
+          },
+          { transaction },
+        )
+        await syncProductAggregate(Number(sku.productId), transaction)
+      }
+      order.adminRemark = `${order.adminRemark ?? ''}[后台关单] 已付款订单关闭，需线下退款：${reason}`.slice(0, 255)
+    } else {
+      throw new AppError('当前订单状态不可关闭', ERR.ORDER_STATUS_INVALID)
+    }
+
+    order.status = ORDER_STATUS.CLOSED
+    order.closeTime = new Date()
+    await order.save({ transaction })
+    await writeOrderLog(Number(order.id), 'admin_close', operator, reason, transaction)
+    const full = await Order.findByPk(order.id, { include: orderInclude, transaction })
+    return toOrderDto(full as unknown as Parameters<typeof toOrderDto>[0])
+  })
+}
+
+export async function updateAdminRemark(orderNo: string, remark: string, operator: string) {
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({ where: { orderNo }, transaction })
+    if (!order) throw AppError.notFound('订单不存在')
+    order.adminRemark = remark
+    await order.save({ transaction })
+    await writeOrderLog(Number(order.id), 'remark', operator, remark, transaction)
+    return { orderNo: order.orderNo, adminRemark: order.adminRemark ?? '' }
+  })
+}
+
 export async function getOrder(userId: number, orderNo: string) {
-  const order = await Order.findOne({ where: { orderNo, userId }, include: orderInclude })
+  const order = await Order.findOne({
+    where: { orderNo, userId },
+    include: [...orderInclude, { model: OrderLog, as: 'logs', order: [['id', 'ASC']] }],
+  })
   if (!order) throw AppError.notFound('订单不存在')
   return toOrderDto(order as unknown as Parameters<typeof toOrderDto>[0])
 }
@@ -202,30 +446,117 @@ export async function cancelOrder(userId: number, orderNo: string) {
     if (order.status !== ORDER_STATUS.PENDING_PAY) {
       throw new AppError('当前订单状态不可取消', ERR.ORDER_STATUS_INVALID)
     }
-    await releaseLockedStock(Number(order.id), userId, transaction)
+    await releaseLockedStock(Number(order.id), `user:${userId}`, transaction)
     order.status = ORDER_STATUS.CLOSED
     order.closeTime = new Date()
     await order.save({ transaction })
+    await writeOrderLog(Number(order.id), 'cancel', `user:${userId}`, '用户取消订单', transaction)
     return toOrderDto(order as unknown as Parameters<typeof toOrderDto>[0])
   })
 }
 
 export async function confirmOrder(userId: number, orderNo: string) {
-  const order = await Order.findOne({ where: { orderNo, userId } })
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({
+      where: { orderNo, userId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    })
+    if (!order) throw AppError.notFound('订单不存在')
+    if (order.status !== ORDER_STATUS.SHIPPED) {
+      throw new AppError('当前订单状态不可确认收货', ERR.ORDER_STATUS_INVALID)
+    }
+    order.status = ORDER_STATUS.FINISHED
+    order.receiveTime = new Date()
+    order.finishTime = new Date()
+    await order.save({ transaction })
+
+    await writeOrderLog(Number(order.id), 'confirm', `user:${userId}`, '用户确认收货', transaction)
+
+    // 订单完成赠送积分（1 元 = 1 积分），失败不阻断收货
+    await awardForOrder(
+      userId,
+      order.orderNo,
+      Number(order.paidAmount) || Number(order.payAmount),
+      transaction,
+    )
+
+    return toOrderDto(order as unknown as Parameters<typeof toOrderDto>[0])
+  })
+}
+
+/**
+ * 支付成功：扣减真实库存 + 释放锁定库存 + 订单转已付款。
+ * 必须在支付回调的同一事务内调用；对非「待付款」订单直接返回，保证回调幂等与关单竞态安全。
+ */
+export async function applyPaymentSuccess(
+  orderId: number,
+  input: { payType: number; payTime: Date; paidAmount: string; payNo: string },
+  transaction: import('sequelize').Transaction,
+): Promise<void> {
+  const order = await Order.findByPk(orderId, { transaction, lock: transaction.LOCK.UPDATE })
   if (!order) throw AppError.notFound('订单不存在')
-  if (order.status !== ORDER_STATUS.SHIPPED) {
-    throw new AppError('当前订单状态不可确认收货', ERR.ORDER_STATUS_INVALID)
+  if (order.status !== ORDER_STATUS.PENDING_PAY) return
+
+  const items = await OrderItem.findAll({ where: { orderId }, transaction })
+  const salesByProduct = new Map<number, number>()
+  for (const item of items) {
+    const sku = await ProductSku.findByPk(item.skuId, { transaction, lock: transaction.LOCK.UPDATE })
+    if (!sku) continue
+    const before = sku.stock
+    sku.stock = Math.max(0, sku.stock - item.quantity)
+    sku.lockedStock = Math.max(0, sku.lockedStock - item.quantity)
+    await sku.save({ transaction })
+    await InventoryLog.create(
+      {
+        skuId: Number(sku.id),
+        type: INVENTORY_TYPE.PAID_DEDUCT,
+        change: -item.quantity,
+        before,
+        after: sku.stock,
+        operator: `pay:${input.payNo}`,
+        remark: '支付成功扣减库存',
+      },
+      { transaction },
+    )
+    const pid = Number(sku.productId)
+    salesByProduct.set(pid, (salesByProduct.get(pid) ?? 0) + item.quantity)
   }
-  order.status = ORDER_STATUS.FINISHED
-  order.receiveTime = new Date()
-  order.finishTime = new Date()
-  await order.save()
-  return toOrderDto(order as unknown as Parameters<typeof toOrderDto>[0])
+
+  for (const [productId, qty] of salesByProduct) {
+    await syncProductAggregate(productId, transaction, qty)
+  }
+
+  await FinanceRecord.create(
+    {
+      orderId,
+      type: FINANCE_TYPE.INCOME,
+      amount: input.paidAmount,
+      channel: input.payType,
+      status: 1,
+      occurredAt: input.payTime,
+    },
+    { transaction },
+  )
+
+  order.status = ORDER_STATUS.PAID
+  order.payType = input.payType
+  order.payTime = input.payTime
+  order.paidAmount = input.paidAmount
+  await order.save({ transaction })
+
+  await writeOrderLog(
+    orderId,
+    'pay',
+    'system',
+    `支付成功，实付 ¥${input.paidAmount}（${input.payNo}）`,
+    transaction,
+  )
 }
 
 async function releaseLockedStock(
   orderId: number,
-  userId: number,
+  operator: string,
   transaction: import('sequelize').Transaction,
 ) {
   const items = await OrderItem.findAll({ where: { orderId }, transaction })
@@ -238,16 +569,18 @@ async function releaseLockedStock(
     await InventoryLog.create(
       {
         skuId: Number(sku.id),
-        type: 4,
+        type: INVENTORY_TYPE.CANCEL_RELEASE,
         change: -item.quantity,
         before,
         after: sku.lockedStock,
-        operator: `user:${userId}`,
+        operator,
         remark: '取消订单回退锁定库存',
       },
       { transaction },
     )
   }
+  // 同步释放下单时预扣的秒杀库存（仅秒杀明细会命中）
+  await releaseSeckill(orderId, transaction)
 }
 
 /** 待支付订单超时自动关单（定时任务调用） */
@@ -258,10 +591,17 @@ export async function closeExpiredOrders(minutes = 30) {
   })
   for (const order of expired) {
     await sequelize.transaction(async (transaction) => {
-      await releaseLockedStock(Number(order.id), Number(order.userId), transaction)
+      await releaseLockedStock(Number(order.id), 'system:auto-close', transaction)
       order.status = ORDER_STATUS.CLOSED
       order.closeTime = new Date()
       await order.save({ transaction })
+      await writeOrderLog(
+        Number(order.id),
+        'auto_close',
+        'system',
+        `待支付超 ${minutes} 分钟自动关闭`,
+        transaction,
+      )
     })
   }
   return expired.length

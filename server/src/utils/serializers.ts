@@ -1,9 +1,10 @@
 import type { Brand, Category, Product, ProductImage, ProductSku, ProductComment } from '../models/product'
-import type { Order, OrderItem, OrderLogistics } from '../models/trade'
+import type { Order, OrderItem, OrderLog, OrderLogistics } from '../models/trade'
 import type { Cart } from '../models/trade'
 import type { Coupon, UserCoupon, SeckillProduct, Banner } from '../models/marketing'
 import type { User, UserAddress } from '../models/user'
 import { maskPhone } from './helpers'
+import { ORDER_ACTION_TEXT } from './orderLog'
 
 export type ProductWithRelations = Product & {
   category?: (Category & { parent?: Category | null }) | null
@@ -201,19 +202,27 @@ export function toOrderItemDto(item: OrderItem) {
     skuSpecText: item.skuSpecText ?? '',
     productImage: item.productImage ?? '',
     price: num(item.price),
+    /** 原价（未参与秒杀时与 price 相同） */
+    originalPrice: num(item.originalPrice) || num(item.price),
+    seckill: Boolean(item.seckillProductId),
     quantity: item.quantity,
     subtotal: num(item.subtotal),
     isCommented: Boolean(item.isCommented),
   }
 }
 
-export function toOrderDto(order: Order & { items?: OrderItem[]; logistics?: OrderLogistics | null }) {
+export function toOrderDto(
+  order: Order & { items?: OrderItem[]; logistics?: OrderLogistics | null; logs?: OrderLog[] },
+) {
   return {
     orderNo: order.orderNo,
     status: order.status as 10 | 20 | 30 | 40 | 50 | 60 | 70,
     items: (order.items ?? []).map(toOrderItemDto),
     totalAmount: num(order.totalAmount),
     discountAmount: num(order.discountAmount),
+    /** 分档优惠快照：秒杀 → 满减 → 优惠券 */
+    seckillAmount: num(order.seckillAmount),
+    promotionAmount: num(order.promotionAmount),
     couponAmount: num(order.couponAmount),
     freightAmount: num(order.freightAmount),
     payAmount: num(order.payAmount),
@@ -226,6 +235,15 @@ export function toOrderDto(order: Order & { items?: OrderItem[]; logistics?: Ord
     receiveTime: order.receiveTime ? formatDate(order.receiveTime) : null,
     remark: order.remark ?? '',
     createdAt: formatDate(order.createdAt),
+    /** 订单操作日志时间轴（仅详情查询返回） */
+    logs: (order.logs ?? []).map((log) => ({
+      id: num(log.id),
+      action: log.action,
+      actionText: ORDER_ACTION_TEXT[log.action] ?? log.action,
+      operator: log.operator,
+      remark: log.remark ?? '',
+      createdAt: formatDate(log.createdAt),
+    })),
     logistics: order.logistics
       ? {
           company: order.logistics.company ?? '',

@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { Brand, Category, CommentItem, Coupon, Order, PageResult, Product, Address, CartItem, UserInfo } from '../types'
+import type { Brand, Category, CommentItem, Coupon, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, UserInfo } from '../types'
 import type {
   AddressPayload,
   CartAddPayload,
@@ -7,9 +7,11 @@ import type {
   CreateOrderPayload,
   HomeData,
   LoginResult,
+  PrepayPayload,
   ProfilePatch,
   ProductQuery,
   RegisterPayload,
+  SandboxPayPayload,
 } from '../contract'
 
 /**
@@ -61,6 +63,7 @@ export const realApi: ClientApi = {
   couponApi: {
     center: () => http.get<Coupon[]>('/coupons/center'),
     mine: () => http.get<Coupon[]>('/user/coupons'),
+    receive: (id) => http.post<{ id: number; couponId: number }>(`/coupons/${id}/receive`),
   },
 
   orderApi: {
@@ -79,11 +82,22 @@ export const realApi: ClientApi = {
   },
 
   userApi: {
-    login: (account, password) => http.post<LoginResult>('/auth/login', { account, password }),
+    login: (account, password, captcha) =>
+      http.post<LoginResult>('/auth/login', {
+        account,
+        password,
+        captchaId: captcha?.captchaId,
+        captchaCode: captcha?.captchaCode,
+      }),
+    captcha: () =>
+      http.get<{ captchaId: string; image: string; expireIn: number }>('/auth/captcha'),
     register: (payload: RegisterPayload) => http.post<LoginResult>('/auth/register', payload),
     profile: () => http.get<UserInfo>('/user/profile'),
     updateProfile: (patch: ProfilePatch) => http.put<UserInfo>('/user/profile', patch),
     uploadAvatar: (file: File) => http.upload<UserInfo>('/user/avatar', file),
+    changePassword: (payload) => http.put<{ changed: boolean }>('/user/password', payload),
+    sendSmsCode: (phone) => http.post<{ phone: string; code: string }>('/auth/sms-code', { phone }),
+    resetPassword: (payload) => http.post<{ reset: boolean }>('/auth/reset-password', payload),
     favorites: () => http.get<Product[]>('/user/favorites'),
     toggleFavorite: (productId) => http.post<{ favorited: boolean }>('/user/favorites/toggle', { productId }),
     footprints: () => http.get<Product[]>('/user/footprints'),
@@ -95,5 +109,48 @@ export const realApi: ClientApi = {
     update: (id, patch) => http.put<CartItem[]>(`/cart/${id}`, patch),
     selectAll: (selected) => http.put<CartItem[]>('/cart/select-all', { selected }),
     remove: (ids) => http.delete<CartItem[]>('/cart', { ids }),
+  },
+
+  paymentApi: {
+    prepay: (payload: PrepayPayload) => http.post<PrepayResult>('/payments/prepay', payload),
+    status: (payNo) => http.get<PayStatusResult>(`/payments/${payNo}/status`),
+    sandboxPay: (payload: SandboxPayPayload) => http.post<void>('/payments/callback/4', payload),
+  },
+
+  refundApi: {
+    apply: (payload) => http.post<Refund>('/refunds', payload),
+    mine: () => http.get<Refund[]>('/refunds'),
+  },
+
+  commentApi: {
+    mine: () => http.get<MyComments>('/user/comments'),
+    create: (payload) => http.post<MyComment>('/comments', payload),
+  },
+
+  pointsApi: {
+    mine: () => http.get<MyPoints>('/user/points'),
+    signIn: () => http.post<{ balance: number; change: number; gain: number; streak: number }>('/user/points/sign-in'),
+  },
+
+  promotionApi: {
+    active: () => http.get<ActivePromotion[]>('/promotions/active'),
+  },
+
+  contentApi: {
+    faqGroups: () => http.get<FaqGroup[]>('/faqs'),
+    logisticsCompanies: () => http.get<LogisticsCompanyItem[]>('/logistics-companies'),
+  },
+
+  seckillApi: {
+    active: () => http.get<ActiveSeckill[]>('/seckills/active'),
+  },
+
+  feedbackApi: {
+    create: (payload) => http.post<FeedbackItem>('/feedbacks', payload),
+    mine: () => http.get<FeedbackItem[]>('/feedbacks'),
+  },
+
+  configApi: {
+    public: () => http.get<PublicConfig>('/config'),
   },
 }

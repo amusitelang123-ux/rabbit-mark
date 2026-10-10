@@ -240,3 +240,62 @@ InventoryLog.init(
   },
   { sequelize, tableName: 'inventory_logs', timestamps: true, updatedAt: false },
 )
+
+/** 规格组（如 颜色 / 尺码），可复用的规格模板 */
+export class SpecGroup extends Model<InferAttributes<SpecGroup>, InferCreationAttributes<SpecGroup>> {
+  declare id: CreationOptional<number>
+  declare name: string
+  declare sort: CreationOptional<number>
+  declare createdAt: CreationOptional<Date>
+}
+
+SpecGroup.init(
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    name: { type: DataTypes.STRING(50), allowNull: false },
+    sort: { type: DataTypes.INTEGER, defaultValue: 0 },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'spec_groups', timestamps: true, updatedAt: false },
+)
+
+/** 规格值 */
+export class SpecValue extends Model<InferAttributes<SpecValue>, InferCreationAttributes<SpecValue>> {
+  declare id: CreationOptional<number>
+  declare groupId: number
+  declare value: string
+  declare sort: CreationOptional<number>
+}
+
+SpecValue.init(
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    groupId: { type: DataTypes.INTEGER, allowNull: false },
+    value: { type: DataTypes.STRING(50), allowNull: false },
+    sort: { type: DataTypes.INTEGER, defaultValue: 0 },
+  },
+  { sequelize, tableName: 'spec_values', timestamps: false },
+)
+
+/** 商品参数（如 产地 / 材质） */
+export class ProductAttribute extends Model<
+  InferAttributes<ProductAttribute>,
+  InferCreationAttributes<ProductAttribute>
+> {
+  declare id: CreationOptional<number>
+  declare productId: number
+  declare name: string
+  declare value: string
+  declare sort: CreationOptional<number>
+}
+
+ProductAttribute.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    productId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    name: { type: DataTypes.STRING(50), allowNull: false },
+    value: { type: DataTypes.STRING(255), allowNull: false },
+    sort: { type: DataTypes.INTEGER, defaultValue: 0 },
+  },
+  { sequelize, tableName: 'product_attributes', timestamps: false },
+)

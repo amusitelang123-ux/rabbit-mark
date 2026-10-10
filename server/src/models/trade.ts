@@ -39,6 +39,8 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare status: CreationOptional<number>
   declare totalAmount: CreationOptional<string>
   declare discountAmount: CreationOptional<string>
+  declare seckillAmount: CreationOptional<string>
+  declare promotionAmount: CreationOptional<string>
   declare couponAmount: CreationOptional<string>
   declare freightAmount: CreationOptional<string>
   declare payAmount: CreationOptional<string>
@@ -68,6 +70,8 @@ Order.init(
     status: { type: DataTypes.TINYINT, defaultValue: 10 },
     totalAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    seckillAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    promotionAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     couponAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     freightAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     payAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
@@ -100,6 +104,8 @@ export class OrderItem extends Model<InferAttributes<OrderItem>, InferCreationAt
   declare skuSpecText: string | null
   declare productImage: string | null
   declare price: string
+  declare originalPrice: CreationOptional<string>
+  declare seckillProductId: number | null
   declare quantity: number
   declare subtotal: string
   declare discountAmount: CreationOptional<string>
@@ -119,6 +125,8 @@ OrderItem.init(
     skuSpecText: { type: DataTypes.STRING(200), allowNull: true },
     productImage: { type: DataTypes.STRING(255), allowNull: true },
     price: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+    originalPrice: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    seckillProductId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
     quantity: { type: DataTypes.INTEGER, allowNull: false },
     subtotal: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
     discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
@@ -196,4 +204,121 @@ PaymentRecord.init(
     updatedAt: DataTypes.DATE,
   },
   { sequelize, tableName: 'payment_records', timestamps: true },
+)
+
+/** 售后 / 退款单 */
+export class OrderRefund extends Model<InferAttributes<OrderRefund>, InferCreationAttributes<OrderRefund>> {
+  declare id: CreationOptional<number>
+  declare refundNo: string
+  declare orderId: number
+  declare orderItemId: number | null
+  declare userId: number
+  declare type: number
+  declare reason: string | null
+  declare amount: string
+  declare images: string[] | null
+  declare status: CreationOptional<number>
+  declare auditRemark: string | null
+  declare auditAt: Date | null
+  declare createdAt: CreationOptional<Date>
+  declare updatedAt: CreationOptional<Date>
+}
+
+OrderRefund.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    refundNo: { type: DataTypes.STRING(32), allowNull: false },
+    orderId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    orderItemId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
+    userId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    type: { type: DataTypes.TINYINT, allowNull: false },
+    reason: { type: DataTypes.STRING(255), allowNull: true },
+    amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+    images: { type: DataTypes.JSON, allowNull: true },
+    status: { type: DataTypes.TINYINT, defaultValue: 0 },
+    auditRemark: { type: DataTypes.STRING(255), allowNull: true },
+    auditAt: { type: DataTypes.DATE, allowNull: true },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'order_refunds', timestamps: true },
+)
+
+/** 财务流水 */
+export class FinanceRecord extends Model<
+  InferAttributes<FinanceRecord>,
+  InferCreationAttributes<FinanceRecord>
+> {
+  declare id: CreationOptional<number>
+  declare orderId: number | null
+  declare type: number
+  declare amount: string
+  declare channel: number | null
+  declare status: CreationOptional<number>
+  declare occurredAt: Date
+  declare createdAt: CreationOptional<Date>
+}
+
+FinanceRecord.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    orderId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
+    type: { type: DataTypes.TINYINT, allowNull: false },
+    amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+    channel: { type: DataTypes.TINYINT, allowNull: true },
+    status: { type: DataTypes.TINYINT, defaultValue: 1 },
+    occurredAt: { type: DataTypes.DATE, allowNull: false },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'finance_records', timestamps: true, updatedAt: false },
+)
+
+/** 发票 */
+export class Invoice extends Model<InferAttributes<Invoice>, InferCreationAttributes<Invoice>> {
+  declare id: CreationOptional<number>
+  declare orderId: number
+  declare type: number
+  declare title: string
+  declare taxNo: string | null
+  declare content: string | null
+  declare email: string | null
+  declare status: CreationOptional<number>
+  declare createdAt: CreationOptional<Date>
+}
+
+Invoice.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    orderId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    type: { type: DataTypes.TINYINT, allowNull: false },
+    title: { type: DataTypes.STRING(100), allowNull: false },
+    taxNo: { type: DataTypes.STRING(50), allowNull: true },
+    content: { type: DataTypes.STRING(255), allowNull: true },
+    email: { type: DataTypes.STRING(100), allowNull: true },
+    status: { type: DataTypes.TINYINT, defaultValue: 0 },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'invoices', timestamps: true, updatedAt: false },
+)
+
+/** 订单操作日志（A-25）：记录状态变更的操作人、时间、原因 */
+export class OrderLog extends Model<InferAttributes<OrderLog>, InferCreationAttributes<OrderLog>> {
+  declare id: CreationOptional<number>
+  declare orderId: number
+  declare action: string
+  declare operator: string
+  declare remark: string | null
+  declare createdAt: CreationOptional<Date>
+}
+
+OrderLog.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    orderId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    action: { type: DataTypes.STRING(50), allowNull: false },
+    operator: { type: DataTypes.STRING(50), allowNull: false },
+    remark: { type: DataTypes.STRING(255), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'order_logs', timestamps: true, updatedAt: false },
 )

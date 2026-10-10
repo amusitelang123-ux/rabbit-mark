@@ -89,3 +89,48 @@ Permission.init(
   },
   { sequelize, tableName: 'permissions', timestamps: false },
 )
+
+/** 角色-权限关联 */
+export class RolePermission extends Model<
+  InferAttributes<RolePermission>,
+  InferCreationAttributes<RolePermission>
+> {
+  declare id: CreationOptional<number>
+  declare roleId: number
+  declare permissionId: number
+}
+
+RolePermission.init(
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    roleId: { type: DataTypes.INTEGER, allowNull: false },
+    permissionId: { type: DataTypes.INTEGER, allowNull: false },
+  },
+  { sequelize, tableName: 'role_permissions', timestamps: false },
+)
+
+/** 后台操作日志 */
+export class AdminLog extends Model<InferAttributes<AdminLog>, InferCreationAttributes<AdminLog>> {
+  declare id: CreationOptional<number>
+  declare adminId: number | null
+  declare module: string | null
+  declare action: string | null
+  declare targetId: number | null
+  declare content: string | null
+  declare ip: string | null
+  declare createdAt: CreationOptional<Date>
+}
+
+AdminLog.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    adminId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
+    module: { type: DataTypes.STRING(50), allowNull: true },
+    action: { type: DataTypes.STRING(50), allowNull: true },
+    targetId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
+    content: { type: DataTypes.STRING(1000), allowNull: true },
+    ip: { type: DataTypes.STRING(64), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'admin_logs', timestamps: true, updatedAt: false },
+)

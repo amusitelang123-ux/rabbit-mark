@@ -13,7 +13,7 @@ import {
   UserLevel,
 } from '../models'
 import { AppError } from '../utils/errors'
-import { ERR } from '../constants'
+import { ERR, SMS_MOCK_CODE } from '../constants'
 import { signAccessToken, signRefreshToken, verifyToken } from '../utils/jwt'
 import { maskPhone } from '../utils/helpers'
 import { toAddressDto, toProductDto, toUserDto, type ProductWithRelations } from '../utils/serializers'
@@ -106,6 +106,36 @@ export async function updateAvatar(userId: number, avatarUrl: string) {
   user.avatar = avatarUrl
   await user.save()
   return toUserDto(user as unknown as Parameters<typeof toUserDto>[0])
+}
+
+/** 修改密码：校验旧密码后重新加盐哈希 */
+export async function changePassword(
+  userId: number,
+  input: { oldPassword: string; newPassword: string },
+) {
+  const user = await loadUser(userId)
+  const matched = await bcrypt.compare(input.oldPassword, user.password)
+  if (!matched) throw new AppError('原密码不正确', ERR.PARAM)
+  if (input.oldPassword === input.newPassword) {
+    throw new AppError('新密码不能与原密码相同', ERR.PARAM)
+  }
+  user.password = await bcrypt.hash(input.newPassword, 10)
+  await user.save()
+  return { changed: true }
+}
+
+/** 找回密码：手机号 + 短信验证码重置（演示环境验证码固定为 SMS_MOCK_CODE） */
+export async function resetPassword(input: { phone: string; code: string; newPassword: string }) {
+  if (input.code !== SMS_MOCK_CODE) {
+    throw new AppError('验证码不正确', ERR.SMS_CODE_INVALID)
+  }
+  const user = await User.findOne({ where: { phone: input.phone } })
+  if (!user) throw AppError.notFound('该手机号尚未注册')
+  if (user.status !== 1) throw new AppError('账号已被禁用', ERR.USER_DISABLED)
+
+  user.password = await bcrypt.hash(input.newPassword, 10)
+  await user.save()
+  return { reset: true }
 }
 
 /* --------------------------------- Address -------------------------------- */

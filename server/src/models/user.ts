@@ -141,3 +141,30 @@ UserFootprint.init(
   },
   { sequelize, tableName: 'user_footprints', timestamps: false },
 )
+
+/** 积分流水：1签到 2消费获得 3积分抵扣 4后台调整 */
+export class UserPointsLog extends Model<
+  InferAttributes<UserPointsLog>,
+  InferCreationAttributes<UserPointsLog>
+> {
+  declare id: CreationOptional<number>
+  declare userId: number
+  declare type: number
+  declare change: number
+  declare balance: number
+  declare remark: string | null
+  declare createdAt: CreationOptional<Date>
+}
+
+UserPointsLog.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    type: { type: DataTypes.TINYINT, allowNull: false },
+    change: { type: DataTypes.INTEGER, allowNull: false },
+    balance: { type: DataTypes.INTEGER, allowNull: false },
+    remark: { type: DataTypes.STRING(255), allowNull: true },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'user_points_log', timestamps: true, updatedAt: false },
+)

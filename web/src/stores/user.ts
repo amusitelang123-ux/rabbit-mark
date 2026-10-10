@@ -32,8 +32,12 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem(USER_KEY, JSON.stringify(result.user))
   }
 
-  async function login(account: string, password: string) {
-    setSession(await userApi.login(account, password))
+  async function login(
+    account: string,
+    password: string,
+    captcha?: { captchaId: string; captchaCode: string },
+  ) {
+    setSession(await userApi.login(account, password, captcha))
   }
 
   async function register(payload: RegisterPayload) {
