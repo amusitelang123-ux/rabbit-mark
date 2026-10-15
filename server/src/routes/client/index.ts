@@ -14,6 +14,7 @@ import * as content from '../../controllers/client/contentController'
 import * as seckill from '../../controllers/client/seckillController'
 import * as feedback from '../../controllers/client/feedbackController'
 import * as coupon from '../../controllers/client/couponController'
+import * as notice from '../../controllers/client/noticeController'
 
 const router = Router()
 
@@ -99,5 +100,9 @@ router.get('/config', feedback.publicConfig)
 router.get('/coupons/center', coupon.center)
 router.post('/coupons/:id/receive', requireAuth, coupon.receive)
 router.get('/user/coupons', requireAuth, coupon.mine)
+
+/* 公告（只读） */
+router.get('/notices', notice.list)
+router.get('/notices/:id', notice.detail)
 
 export default router

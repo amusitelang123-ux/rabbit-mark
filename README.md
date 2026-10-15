@@ -215,6 +215,7 @@ VITE_USE_MOCK=true
 | 用户 | `GET/PUT /api/client/v1/user/profile`、`/user/addresses`、`/user/favorites`、`/user/footprints`、`/user/coupons` |
 | 订单 | `POST/GET /api/client/v1/orders`、`GET /orders/:orderNo`、`PUT /orders/:orderNo/cancel` `/confirm` |
 | 优惠券 | `GET /api/client/v1/coupons/center`、`POST /coupons/:id/receive` |
+| 公告 | `GET /api/client/v1/notices`、`/notices/:id` |
 
 数据库设计详见 `server/database/sql/xtx_mall.schema.sql`。
 
