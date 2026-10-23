@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { Brand, Category, CommentItem, Coupon, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, UserInfo } from '../types'
+import type { Brand, Category, CommentItem, Coupon, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, UserInfo, Notice } from '../types'
 import type {
   AddressPayload,
   CartAddPayload,
@@ -152,5 +152,10 @@ export const realApi: ClientApi = {
 
   configApi: {
     public: () => http.get<PublicConfig>('/config'),
+  },
+
+  noticeApi: {
+    list: (limit) => http.get<Notice[]>('/notices', { limit }),
+    detail: (id) => http.get<Notice>(`/notices/${id}`),
   },
 }
