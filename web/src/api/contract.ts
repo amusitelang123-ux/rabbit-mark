@@ -24,6 +24,7 @@ import type {
   Refund,
   SeckillProduct,
   UserInfo,
+  Notice,
 } from './types'
 
 export interface ProductQuery {
@@ -194,6 +195,12 @@ export interface ClientApi {
   }
   configApi: {
     public(): Promise<PublicConfig>
+  }
+  noticeApi: {
+    /** 已发布公告列表，按发布时间倒序；limit 省略时后端取默认 20 */
+    list(limit?: number): Promise<Notice[]>
+    /** 公告详情；不存在或未启用时后端返回 404，前端表现为 reject */
+    detail(id: number): Promise<Notice>
   }
 }
 

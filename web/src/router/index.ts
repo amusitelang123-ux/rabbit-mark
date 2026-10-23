@@ -21,6 +21,8 @@ const router = createRouter({
         { path: 'coupons', name: 'coupons', component: () => import('@/views/client/marketing/coupons.vue'), meta: { title: '领券中心' } },
         { path: 'seckill', name: 'seckill', component: () => import('@/views/client/seckill/index.vue'), meta: { title: '限时秒杀' } },
         { path: 'help', name: 'help', component: () => import('@/views/client/help/index.vue'), meta: { title: '帮助中心' } },
+        { path: 'notices', name: 'notices', component: () => import('@/views/client/notice/list.vue'), meta: { title: '平台公告' } },
+        { path: 'notices/:id', name: 'notice-detail', component: () => import('@/views/client/notice/detail.vue'), meta: { title: '公告详情' } },
         { path: 'user', name: 'user', component: () => import('@/views/client/user/center.vue'), meta: { title: '个人中心', auth: true } },
       ],
     },

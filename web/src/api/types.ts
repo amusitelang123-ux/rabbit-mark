@@ -383,3 +383,16 @@ export interface PublicConfig {
   serviceEmail: string
   serviceHours: string
 }
+
+/** 站内公告（用户端） */
+export interface Notice {
+  id: number
+  title: string
+  /** 正文；后端 content 为 null 时已归一为 '' */
+  content: string
+  /** 公告类型（后端默认 1，暂无公开枚举定义） */
+  type: number
+  /** 发布时间，格式 YYYY-MM-DD HH:mm:ss；后端在 publishAt 为空时回退为 createdAt */
+  publishAt: string
+  createdAt: string
+}

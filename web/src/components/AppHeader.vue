@@ -257,6 +257,7 @@ function logout() {
 
         <router-link to="/seckill" class="hdr__sub-link">限时秒杀</router-link>
         <router-link to="/coupons" class="hdr__sub-link">领券中心</router-link>
+        <router-link to="/notices" class="hdr__sub-link">平台公告</router-link>
         <router-link to="/help" class="hdr__sub-link">帮助中心</router-link>
 
         <span class="hdr__sub-promo">新人首单立减 ¥88</span>

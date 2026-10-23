@@ -23,6 +23,7 @@ import {
   commentsFor,
   coupons as mockCoupons,
   demoUser,
+  notices as mockNotices,
   orders as mockOrders,
   products as mockProducts,
   seckills as mockSeckills,
@@ -38,6 +39,11 @@ const LATENCY = 200
 
 function delay<T>(data: T, ms = LATENCY): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(data), ms))
+}
+
+/** 模拟接口失败：与 request.ts 保持一致，抛出 Error(message) */
+function rejectWith<T>(message: string, ms = LATENCY): Promise<T> {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
 }
 
 function paginate<T>(list: T[], page: number, pageSize: number): PageResult<T> {
@@ -425,5 +431,19 @@ export const mockApi: ClientApi = {
         serviceEmail: 'service@xtx-mall.demo',
         serviceHours: '每日 9:00 - 22:00',
       }),
+  },
+
+  noticeApi: {
+    list: (limit = 20) => {
+      const n = Math.min(Math.max(limit, 1), 50)
+      const sorted = [...mockNotices].sort((a, b) =>
+        a.publishAt === b.publishAt ? b.id - a.id : a.publishAt < b.publishAt ? 1 : -1,
+      )
+      return delay(sorted.slice(0, n))
+    },
+    detail: (id) => {
+      const found = mockNotices.find((n) => n.id === id)
+      return found ? delay(found) : rejectWith('公告不存在')
+    },
   },
 }
