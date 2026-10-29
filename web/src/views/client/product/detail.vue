@@ -23,7 +23,8 @@ const comments = ref<CommentItem[]>([])
 const recommend = ref<Product[]>([])
 const loading = ref(true)
 
-const activeImage = ref('')
+/** 图集预览图：鼠标悬停/键盘聚焦缩略图时临时展示，离开图集后清空并回到主图 */
+const previewImage = ref('')
 const selectedSpec = ref<Record<string, string>>({})
 const quantity = ref(1)
 const activeTab = ref<'detail' | 'spec' | 'review'>('detail')
@@ -55,7 +56,9 @@ const selectedSku = computed(() => {
 const displayPrice = computed(() => selectedSku.value?.price ?? product.value?.priceMin ?? 0)
 const displayMarket = computed(() => selectedSku.value?.marketPrice ?? 0)
 const displayStock = computed(() => selectedSku.value?.stock ?? product.value?.totalStock ?? 0)
-const displayImage = computed(() => activeImage.value || selectedSku.value?.image || product.value?.mainImage || '')
+const displayImage = computed(
+  () => previewImage.value || product.value?.mainImage || selectedSku.value?.image || '',
+)
 const isComplete = computed(() => specGroups.value.every((g) => selectedSpec.value[g.name]))
 
 const ratingDist = computed(() => {
@@ -139,7 +142,7 @@ async function load(id: number) {
   comments.value = c
   recommend.value = r
   if (p) {
-    activeImage.value = p.mainImage
+    previewImage.value = ''
     const first = p.skus[0]
     selectedSpec.value = first ? { ...first.spec } : {}
   }
@@ -176,13 +179,17 @@ watch(
         <div class="pd card">
           <!-- Gallery -->
           <div class="pd__gallery">
-            <div class="pd__thumbs">
+            <div class="pd__thumbs" @mouseleave="previewImage = ''">
               <button
                 v-for="(img, i) in product.images"
                 :key="i"
+                type="button"
                 :class="{ 'is-active': displayImage === img }"
-                @mouseenter="activeImage = img"
-                @click="activeImage = img"
+                :aria-label="`查看 ${product.name} 第 ${i + 1} 张图片`"
+                @mouseenter="previewImage = img"
+                @focus="previewImage = img"
+                @blur="previewImage = ''"
+                @click="previewImage = img"
               >
                 <img :src="img" :alt="`${product.name} 图 ${i + 1}`" />
               </button>
