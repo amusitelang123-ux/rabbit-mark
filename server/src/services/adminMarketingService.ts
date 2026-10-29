@@ -1,6 +1,6 @@
 import { Op, type Transaction, type WhereOptions } from 'sequelize'
 import { sequelize } from '../config/database'
-import { Banner, Coupon, Notice, Product, Promotion, SeckillActivity, SeckillProduct, UserCoupon } from '../models'
+import { Banner, Category, Coupon, Notice, Product, Promotion, SeckillActivity, SeckillProduct, UserCoupon } from '../models'
 import { AppError } from '../utils/errors'
 import { ERR } from '../constants'
 import { formatDate } from '../utils/serializers'
@@ -41,7 +41,9 @@ function toCouponDto(c: Coupon) {
     validEnd: c.validEnd ? formatDate(c.validEnd) : '',
     validDays: c.validDays,
     scope: c.scope,
-    scopeIds: c.scopeIds ?? [],
+    scopeIds: Array.isArray(c.scopeIds)
+      ? c.scopeIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+      : [],
     status: c.status,
     createdAt: formatDate(c.createdAt),
   }
@@ -133,7 +135,45 @@ function assertCouponConfig(config: CouponConfig): void {
   if (config.perUserLimit < 1) throw new AppError('每人限领至少为 1 张', ERR.PARAM)
 }
 
+/** 去重并过滤非法范围 ID；scope=1 时统一清空，避免切换范围后残留脏值 */
+function normalizeScopeIds(
+  scope: number,
+  scopeIds: number[] | null | undefined,
+): number[] | null {
+  if (scope === 1) return null
+  return [
+    ...new Set(
+      (scopeIds ?? [])
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ]
+}
+
+/** 校验范围 ID 真实存在，且类型与 scope 匹配，避免把商品 ID 当分类 ID 使用 */
+async function assertCouponScopeExists(config: CouponConfig): Promise<void> {
+  if (config.scope === 1) return
+
+  const ids = config.scopeIds ?? []
+  if (!ids.length) throw new AppError('指定分类/商品的券必须配置适用范围', ERR.PARAM)
+
+  if (config.scope === 2) {
+    const count = await Category.count({ where: { id: { [Op.in]: ids } } })
+    if (count !== ids.length) throw new AppError('适用范围包含不存在的分类', ERR.PARAM)
+    return
+  }
+
+  if (config.scope === 3) {
+    const count = await Product.count({ where: { id: { [Op.in]: ids } } })
+    if (count !== ids.length) throw new AppError('适用范围包含不存在的商品', ERR.PARAM)
+    return
+  }
+
+  throw new AppError('优惠券适用范围不合法', ERR.PARAM)
+}
+
 export async function createCoupon(input: CouponInput) {
+  const scope = input.scope ?? 1
   const config: CouponConfig = {
     type: input.type,
     amount: input.amount ?? 0,
@@ -143,12 +183,13 @@ export async function createCoupon(input: CouponInput) {
     validStart: input.validStart ? new Date(input.validStart) : null,
     validEnd: input.validEnd ? new Date(input.validEnd) : null,
     validDays: input.validDays ?? null,
-    scope: input.scope ?? 1,
-    scopeIds: input.scopeIds ?? null,
+    scope,
+    scopeIds: normalizeScopeIds(scope, input.scopeIds),
     totalCount: input.totalCount ?? 0,
     perUserLimit: input.perUserLimit ?? 1,
   }
   assertCouponConfig(config)
+  await assertCouponScopeExists(config)
 
   const coupon = await Coupon.create({
     name: input.name,
@@ -173,6 +214,17 @@ export async function updateCoupon(id: number, input: Partial<CouponInput>) {
   const coupon = await Coupon.findByPk(id)
   if (!coupon) throw AppError.notFound('优惠券不存在')
 
+  const scope = input.scope ?? coupon.scope
+  // 从「指定分类」切到「指定商品」时，旧分类 ID 不能直接当商品 ID 复用
+  if (
+    input.scope !== undefined &&
+    input.scope !== coupon.scope &&
+    input.scope !== 1 &&
+    input.scopeIds === undefined
+  ) {
+    throw new AppError('切换适用范围时必须重新选择分类/商品', ERR.PARAM)
+  }
+
   const config: CouponConfig = {
     type: input.type ?? coupon.type,
     amount: input.amount ?? Number(coupon.amount),
@@ -192,12 +244,16 @@ export async function updateCoupon(id: number, input: Partial<CouponInput>) {
           : null
         : coupon.validEnd,
     validDays: input.validDays !== undefined ? input.validDays : coupon.validDays,
-    scope: input.scope ?? coupon.scope,
-    scopeIds: input.scopeIds !== undefined ? input.scopeIds : coupon.scopeIds,
+    scope,
+    scopeIds: normalizeScopeIds(
+      scope,
+      input.scopeIds !== undefined ? input.scopeIds : coupon.scopeIds,
+    ),
     totalCount: input.totalCount ?? coupon.totalCount,
     perUserLimit: input.perUserLimit ?? coupon.perUserLimit,
   }
   assertCouponConfig(config)
+  await assertCouponScopeExists(config)
 
   if (input.name !== undefined) coupon.name = input.name
   if (input.type !== undefined) coupon.type = input.type
@@ -210,8 +266,8 @@ export async function updateCoupon(id: number, input: Partial<CouponInput>) {
   if (input.validStart !== undefined) coupon.validStart = input.validStart ? new Date(input.validStart) : null
   if (input.validEnd !== undefined) coupon.validEnd = input.validEnd ? new Date(input.validEnd) : null
   if (input.validDays !== undefined) coupon.validDays = input.validDays
-  if (input.scope !== undefined) coupon.scope = input.scope
-  if (input.scopeIds !== undefined) coupon.scopeIds = input.scopeIds
+  coupon.scope = config.scope
+  coupon.scopeIds = config.scopeIds
   if (input.status !== undefined) coupon.status = input.status
   await coupon.save()
   return toCouponDto(coupon)

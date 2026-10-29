@@ -18,7 +18,7 @@ const couponSchema = z.object({
   validEnd: z.string().optional(),
   validDays: z.number().int().positive().optional(),
   scope: z.number().int().min(1).max(3).optional(),
-  scopeIds: z.array(z.number().int()).optional(),
+  scopeIds: z.array(z.number().int().positive()).optional(),
   status: z.number().int().min(0).max(1).optional(),
 })
 

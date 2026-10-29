@@ -42,26 +42,47 @@ async function loadCategoryParents(
   )
 }
 
+/** 归一化券范围 ID：去重、过滤非正整数；scope=1 时无范围概念 */
+function couponScopeIds(coupon: Coupon): number[] {
+  const raw = Array.isArray(coupon.scopeIds) ? coupon.scopeIds : []
+  return [
+    ...new Set(
+      raw
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ]
+}
+
+/**
+ * 券范围配置是否完整。
+ * scope=2/3 必须有非空范围，不能按“全场”兜底，否则分类券/商品券会越权抵扣。
+ */
+function hasValidScopeConfig(coupon: Coupon): boolean {
+  if (coupon.scope === 1) return true
+  if (coupon.scope !== 2 && coupon.scope !== 3) return false
+  return couponScopeIds(coupon).length > 0
+}
+
 function matchesScope(
   coupon: Coupon,
   line: CouponLine,
   parents: Map<number, number | null>,
 ): boolean {
   if (coupon.scope === 1) return true
-  const scopeIds = (coupon.scopeIds ?? []).map(Number)
-  // 兼容历史数据：scope=2/3 但范围为空时按全场处理，避免旧券整体失效。
-  // 新建/编辑券时后台会强制要求配置范围。
-  if (!scopeIds.length) return true
+  if (coupon.scope !== 2 && coupon.scope !== 3) return false
+
+  const scopeIds = couponScopeIds(coupon)
+  if (!scopeIds.length) return false
+
   if (coupon.scope === 3) return scopeIds.includes(line.productId)
-  if (coupon.scope === 2) {
-    let current: number | null = line.categoryId
-    const seen = new Set<number>()
-    while (current && !seen.has(current)) {
-      if (scopeIds.includes(current)) return true
-      seen.add(current)
-      current = parents.get(current) ?? null
-    }
-    return false
+  // scope=2：从商品所属分类向上找，命中任意祖先分类即视为适用
+  let current: number | null = line.categoryId
+  const seen = new Set<number>()
+  while (current && !seen.has(current)) {
+    if (scopeIds.includes(current)) return true
+    seen.add(current)
+    current = parents.get(current) ?? null
   }
   return false
 }
@@ -69,6 +90,7 @@ function matchesScope(
 /** 领券中心：启用中、在领取期内且未领完 */
 function isCouponClaimable(coupon: Coupon, now: Date): boolean {
   if (coupon.status !== 1) return false
+  if (!hasValidScopeConfig(coupon)) return false
   if (coupon.totalCount > 0 && coupon.receivedCount >= coupon.totalCount) return false
   if (coupon.validType === 1) {
     if (coupon.validStart && coupon.validStart.getTime() > now.getTime()) return false
@@ -119,6 +141,10 @@ function evaluateCoupon(
 
   if (userCoupon.expireAt && userCoupon.expireAt.getTime() < now.getTime()) {
     return invalid('优惠券已过期')
+  }
+
+  if (!hasValidScopeConfig(coupon)) {
+    return invalid('优惠券适用范围配置异常')
   }
 
   let eligibleAmount = 0

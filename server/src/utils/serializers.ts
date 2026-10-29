@@ -146,7 +146,9 @@ export function toCouponDto(coupon: Coupon) {
     discountRate: num(coupon.discountRate),
     minAmount: num(coupon.minAmount),
     scope: coupon.scope,
-    scopeIds: coupon.scopeIds ?? [],
+    scopeIds: Array.isArray(coupon.scopeIds)
+      ? coupon.scopeIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+      : [],
     scopeText,
     validType: coupon.validType,
     validStart: coupon.validStart ? formatDate(coupon.validStart) : '',
