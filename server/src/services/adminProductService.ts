@@ -372,7 +372,14 @@ export async function generateSkus(
       JSON.stringify(Object.keys(spec).sort().map((k) => [k, spec[k]]))
     const existSet = new Set(existing.map((s) => signature(s.specJson)))
 
-    let seq = existing.length
+    // SKU 编码 P{productId}-{seq} 全局唯一。不能用 existing.length 续号：
+    // 删除过中间某个 SKU 后长度会与现存最大序号重复，再次生成时撞 uk_sku_code。
+    const codePrefix = `P${productId}-`
+    let seq = existing.reduce((max, sku) => {
+      if (!sku.skuCode.startsWith(codePrefix)) return max
+      const n = Number(sku.skuCode.slice(codePrefix.length))
+      return Number.isInteger(n) && n > max ? n : max
+    }, 0)
     for (const combo of combos) {
       if (existSet.has(signature(combo))) continue
       seq += 1
