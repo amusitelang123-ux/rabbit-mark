@@ -145,8 +145,19 @@ export function toCouponDto(coupon: Coupon) {
     amount: num(coupon.amount),
     discountRate: num(coupon.discountRate),
     minAmount: num(coupon.minAmount),
+    scope: coupon.scope,
+    scopeIds: coupon.scopeIds ?? [],
     scopeText,
+    validType: coupon.validType,
+    validStart: coupon.validStart ? formatDate(coupon.validStart) : '',
+    validEnd: coupon.validEnd ? formatDate(coupon.validEnd) : '',
+    validDays: coupon.validDays ?? null,
     validText,
+    totalCount: coupon.totalCount,
+    receivedCount: coupon.receivedCount,
+    usedCount: coupon.usedCount,
+    remainCount:
+      coupon.totalCount > 0 ? Math.max(0, coupon.totalCount - coupon.receivedCount) : null,
     status: 0 as 0 | 1 | 2,
   }
 }
@@ -165,7 +176,23 @@ export function toUserCouponDto(userCoupon: UserCoupon & { coupon?: Coupon | nul
         validText: '',
         status: 0 as const,
       }
-  return { ...base, id: num(userCoupon.id), status: userCoupon.status as 0 | 1 | 2 }
+  const now = Date.now()
+  const expired =
+    userCoupon.status === 0 &&
+    ((userCoupon.expireAt != null && userCoupon.expireAt.getTime() < now) ||
+      (userCoupon.coupon?.validType === 1 &&
+        userCoupon.coupon.validEnd != null &&
+        userCoupon.coupon.validEnd.getTime() < now))
+
+  return {
+    ...base,
+    id: num(userCoupon.id),
+    status: (expired ? 2 : userCoupon.status) as 0 | 1 | 2,
+    expireAt: formatDate(userCoupon.expireAt),
+    receivedAt: formatDate(userCoupon.receivedAt),
+    usedAt: formatDate(userCoupon.usedAt),
+    orderId: userCoupon.orderId ? num(userCoupon.orderId) : null,
+  }
 }
 
 export function toBannerDto(banner: Banner) {

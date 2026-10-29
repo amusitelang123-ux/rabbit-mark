@@ -16,3 +16,8 @@ export const receive = asyncHandler(async (req: Request, res: Response) => {
 export const mine = asyncHandler(async (req: Request, res: Response) => {
   sendOk(res, await couponService.myCoupons(req.auth!.uid))
 })
+
+/** 结算页：按当前选中购物车返回可用券、真实抵扣额与最优券 */
+export const preview = asyncHandler(async (req: Request, res: Response) => {
+  sendOk(res, await couponService.previewCoupons(req.auth!.uid))
+})

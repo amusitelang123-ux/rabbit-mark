@@ -70,21 +70,100 @@ export async function listCoupons(query: { keyword?: string; status?: number; pa
   }
 }
 
+interface CouponConfig {
+  type: number
+  amount: number
+  discountRate: number
+  minAmount: number
+  validType: number
+  validStart: Date | null
+  validEnd: Date | null
+  validDays: number | null
+  scope: number
+  scopeIds: number[] | null
+  totalCount: number
+  perUserLimit: number
+}
+
+/** 券模板的跨字段校验：避免「满减券面额为 0」「折扣券 10 折」「指定范围却没选范围」等脏配置 */
+function assertCouponConfig(config: CouponConfig): void {
+  if (config.type === 1) {
+    if (config.amount <= 0) throw new AppError('满减券面额必须大于 0', ERR.PARAM)
+  } else if (config.type === 2) {
+    if (config.discountRate <= 0 || config.discountRate >= 1) {
+      throw new AppError('折扣券折扣率必须在 0 到 1 之间（不含 1）', ERR.PARAM)
+    }
+  } else {
+    throw new AppError('优惠券类型不合法', ERR.PARAM)
+  }
+
+  if (config.minAmount < 0) throw new AppError('使用门槛不能为负数', ERR.PARAM)
+
+  if (config.validType === 1) {
+    if (
+      !config.validStart ||
+      !config.validEnd ||
+      Number.isNaN(config.validStart.getTime()) ||
+      Number.isNaN(config.validEnd.getTime())
+    ) {
+      throw new AppError('固定有效期券必须填写合法的开始与结束时间', ERR.PARAM)
+    }
+    if (config.validEnd.getTime() <= config.validStart.getTime()) {
+      throw new AppError('优惠券结束时间必须晚于开始时间', ERR.PARAM)
+    }
+  } else if (config.validType === 2) {
+    if (!config.validDays || config.validDays <= 0) {
+      throw new AppError('领取后生效的券必须填写有效天数', ERR.PARAM)
+    }
+  } else {
+    throw new AppError('优惠券有效期类型不合法', ERR.PARAM)
+  }
+
+  if (config.scope === 1) {
+    // 全场券无需范围
+  } else if (config.scope === 2 || config.scope === 3) {
+    if (!config.scopeIds?.length) {
+      throw new AppError('指定分类/商品的券必须配置适用范围', ERR.PARAM)
+    }
+  } else {
+    throw new AppError('优惠券适用范围不合法', ERR.PARAM)
+  }
+
+  if (config.totalCount < 0) throw new AppError('发放总量不能为负数', ERR.PARAM)
+  if (config.perUserLimit < 1) throw new AppError('每人限领至少为 1 张', ERR.PARAM)
+}
+
 export async function createCoupon(input: CouponInput) {
-  const coupon = await Coupon.create({
-    name: input.name,
+  const config: CouponConfig = {
     type: input.type,
-    amount: (input.amount ?? 0).toFixed(2),
-    discountRate: (input.discountRate ?? 1).toFixed(2),
-    minAmount: (input.minAmount ?? 0).toFixed(2),
-    totalCount: input.totalCount ?? 0,
-    perUserLimit: input.perUserLimit ?? 1,
+    amount: input.amount ?? 0,
+    discountRate: input.discountRate ?? 1,
+    minAmount: input.minAmount ?? 0,
     validType: input.validType ?? 1,
     validStart: input.validStart ? new Date(input.validStart) : null,
     validEnd: input.validEnd ? new Date(input.validEnd) : null,
     validDays: input.validDays ?? null,
     scope: input.scope ?? 1,
     scopeIds: input.scopeIds ?? null,
+    totalCount: input.totalCount ?? 0,
+    perUserLimit: input.perUserLimit ?? 1,
+  }
+  assertCouponConfig(config)
+
+  const coupon = await Coupon.create({
+    name: input.name,
+    type: config.type,
+    amount: config.amount.toFixed(2),
+    discountRate: config.discountRate.toFixed(2),
+    minAmount: config.minAmount.toFixed(2),
+    totalCount: config.totalCount,
+    perUserLimit: config.perUserLimit,
+    validType: config.validType,
+    validStart: config.validStart,
+    validEnd: config.validEnd,
+    validDays: config.validDays,
+    scope: config.scope,
+    scopeIds: config.scopeIds,
     status: input.status ?? 1,
   })
   return toCouponDto(coupon)
@@ -93,6 +172,33 @@ export async function createCoupon(input: CouponInput) {
 export async function updateCoupon(id: number, input: Partial<CouponInput>) {
   const coupon = await Coupon.findByPk(id)
   if (!coupon) throw AppError.notFound('优惠券不存在')
+
+  const config: CouponConfig = {
+    type: input.type ?? coupon.type,
+    amount: input.amount ?? Number(coupon.amount),
+    discountRate: input.discountRate ?? Number(coupon.discountRate),
+    minAmount: input.minAmount ?? Number(coupon.minAmount),
+    validType: input.validType ?? coupon.validType,
+    validStart:
+      input.validStart !== undefined
+        ? input.validStart
+          ? new Date(input.validStart)
+          : null
+        : coupon.validStart,
+    validEnd:
+      input.validEnd !== undefined
+        ? input.validEnd
+          ? new Date(input.validEnd)
+          : null
+        : coupon.validEnd,
+    validDays: input.validDays !== undefined ? input.validDays : coupon.validDays,
+    scope: input.scope ?? coupon.scope,
+    scopeIds: input.scopeIds !== undefined ? input.scopeIds : coupon.scopeIds,
+    totalCount: input.totalCount ?? coupon.totalCount,
+    perUserLimit: input.perUserLimit ?? coupon.perUserLimit,
+  }
+  assertCouponConfig(config)
+
   if (input.name !== undefined) coupon.name = input.name
   if (input.type !== undefined) coupon.type = input.type
   if (input.amount !== undefined) coupon.amount = input.amount.toFixed(2)

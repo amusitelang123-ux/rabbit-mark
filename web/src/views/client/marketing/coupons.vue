@@ -46,7 +46,7 @@ onMounted(async () => {
           <div class="cp__value">
             <b>{{ label(c) }}</b>
             <span v-if="c.type === 1">满 {{ c.minAmount }} 元可用</span>
-            <span v-else>折扣上限 200 元</span>
+            <span v-else>按商品金额比例抵扣</span>
           </div>
           <div class="cp__body">
             <h3>{{ c.name }}</h3>

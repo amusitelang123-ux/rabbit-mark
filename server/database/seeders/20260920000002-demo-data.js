@@ -381,27 +381,33 @@ function buildMarketing(products, skus) {
     [6, '家居满减券', 1, 50, 1, 300, 1, 45],
     [7, '美妆满 199 减 40', 1, 40, 1, 199, 2, 30],
     [8, '服饰 8.8 折券', 2, 0, 0.88, 199, 2, 30],
-  ].map(([id, name, type, amount, rate, minAmount, scope, validDays], i) => ({
-    id,
-    name,
-    type,
-    amount: amount.toFixed(2),
-    discount_rate: rate.toFixed(2),
-    min_amount: minAmount.toFixed(2),
-    total_count: 10000,
-    received_count: 0,
-    used_count: 0,
-    per_user_limit: 3,
-    valid_type: 2,
-    valid_start: dateOffset(-10),
-    valid_end: dateOffset(validDays + 30),
-    valid_days: validDays,
-    scope,
-    scope_ids: null,
-    status: 1,
-    created_at: dateOffset(-10),
-    updated_at: now,
-  }))
+  ].map(([id, name, type, amount, rate, minAmount, , validDays]) => {
+    // 让演示券的范围与名称一致：数码 101、美妆 105、服饰 102，其余为全场券
+    const scope = id === 3 || id === 7 || id === 8 ? 2 : 1
+    const scopeIds = id === 3 ? [101] : id === 7 ? [105] : id === 8 ? [102] : null
+    return {
+      id,
+      name,
+      type,
+      amount: amount.toFixed(2),
+      discount_rate: rate.toFixed(2),
+      min_amount: minAmount.toFixed(2),
+      total_count: 10000,
+      received_count: 0,
+      used_count: 0,
+      per_user_limit: 3,
+      valid_type: 2,
+      valid_start: dateOffset(-10),
+      valid_end: dateOffset(validDays + 30),
+      valid_days: validDays,
+      scope,
+      // queryInterface.bulkInsert 不会自动序列化 JSON 字段，这里必须手动 stringify
+      scope_ids: scopeIds ? JSON.stringify(scopeIds) : null,
+      status: 1,
+      created_at: dateOffset(-10),
+      updated_at: now,
+    }
+  })
 
   const seckillProducts = skus
     .filter((s) => s.id % 100 === 0)

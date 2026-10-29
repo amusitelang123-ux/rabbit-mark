@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { addressApi, couponApi, orderApi, promotionApi, seckillApi } from '@/api'
-import type { ActivePromotion, ActiveSeckill, Address, Coupon } from '@/api/types'
+import type { ActivePromotion, ActiveSeckill, Address, CouponPreview } from '@/api/types'
 import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
 import { useAddressStore } from '@/stores/address'
@@ -17,10 +17,12 @@ const ui = useUiStore()
 const addressStore = useAddressStore()
 
 const addresses = ref<Address[]>([])
-const coupons = ref<Coupon[]>([])
+const coupons = ref<CouponPreview[]>([])
 const showAddressModal = ref(false)
 const selectedAddressId = ref<number | null>(null)
 const selectedCouponId = ref<number | null>(null)
+/** 用户是否明确选择「不使用优惠券」；未操作时交给后端自动匹配最优券 */
+const couponOptOut = ref(false)
 const remark = ref('')
 const invoice = ref<'none' | 'normal' | 'special'>('none')
 const submitting = ref(false)
@@ -52,13 +54,10 @@ const seckillAmount = computed(() => {
 const effectiveTotal = computed(() => Math.max(0, goodsTotal.value - seckillAmount.value))
 
 const freight = computed(() => (effectiveTotal.value >= 99 || effectiveTotal.value === 0 ? 0 : 8))
-const usableCoupons = computed(() => coupons.value.filter((c) => effectiveTotal.value >= c.minAmount))
-const selectedCoupon = computed(() => usableCoupons.value.find((c) => c.id === selectedCouponId.value))
-const couponAmount = computed(() => {
-  if (!selectedCoupon.value) return 0
-  if (selectedCoupon.value.type === 1) return Math.min(selectedCoupon.value.amount, effectiveTotal.value)
-  return effectiveTotal.value * (1 - selectedCoupon.value.discountRate)
-})
+// 后端按当前购物车计算过可用性与真实抵扣额，前端不再自行估算
+const usableCoupons = computed(() => coupons.value)
+const selectedCoupon = computed(() => coupons.value.find((c) => c.id === selectedCouponId.value))
+const couponAmount = computed(() => selectedCoupon.value?.discount ?? 0)
 /* 满减活动：与后端一致，取满足门槛中减免最大的一档 */
 const activePromotions = ref<ActivePromotion[]>([])
 const promotionAmount = computed(() => {
@@ -79,8 +78,13 @@ const payAmount = computed(() =>
   Math.max(0, addMoney(effectiveTotal.value, freight.value) - couponAmount.value - promotionAmount.value),
 )
 
-function couponLabel(c: Coupon): string {
+function couponLabel(c: CouponPreview): string {
   return c.type === 1 ? `满${c.minAmount}减${c.amount}` : `${(c.discountRate * 10).toFixed(1)}折`
+}
+
+function pickCoupon(id: number | null) {
+  selectedCouponId.value = id
+  couponOptOut.value = id === null
 }
 
 function onAddressCreated(address: Address) {
@@ -100,7 +104,7 @@ async function submit() {
   try {
     const order = await orderApi.create({
       addressId: selectedAddressId.value ?? undefined,
-      couponId: selectedCouponId.value ?? undefined,
+      couponId: couponOptOut.value ? 0 : (selectedCouponId.value ?? undefined),
       remark: remark.value || undefined,
     })
     await cart.clearSelected()
@@ -116,12 +120,13 @@ async function submit() {
 onMounted(async () => {
   const [addrs, cps, promos, secks] = await Promise.all([
     addressApi.list(),
-    couponApi.center(),
+    couponApi.preview().catch(() => ({ list: [] as CouponPreview[], bestCouponId: null })),
     promotionApi.active().catch(() => []),
     seckillApi.active().catch(() => []),
   ])
   addresses.value = addrs
-  coupons.value = cps
+  coupons.value = cps.list
+  if (!couponOptOut.value) selectedCouponId.value = cps.bestCouponId
   activePromotions.value = promos
   activeSeckills.value = secks
   selectedAddressId.value = addrs.find((a) => a.isDefault)?.id ?? addrs[0]?.id ?? null
@@ -188,7 +193,7 @@ onMounted(async () => {
               <button
                 class="coupon"
                 :class="{ 'is-active': selectedCouponId === null }"
-                @click="selectedCouponId = null"
+                @click="pickCoupon(null)"
               >
                 <b>不使用优惠券</b>
               </button>
@@ -197,10 +202,10 @@ onMounted(async () => {
                 :key="c.id"
                 class="coupon"
                 :class="{ 'is-active': selectedCouponId === c.id }"
-                @click="selectedCouponId = selectedCouponId === c.id ? null : c.id"
+                @click="pickCoupon(selectedCouponId === c.id ? null : c.id)"
               >
                 <b>{{ couponLabel(c) }}</b>
-                <span>{{ c.name }}</span>
+                <span>{{ c.name }} · 可抵 ¥{{ formatMoney(c.discount) }}</span>
               </button>
             </div>
             <p v-else class="muted">暂无可用优惠券</p>

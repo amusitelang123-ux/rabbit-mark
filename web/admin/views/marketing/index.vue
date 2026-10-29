@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@admin/api'
-import type { AdminBanner, AdminCoupon, AdminFaq, AdminNotice, AdminProduct, AdminPromotion, AdminSeckill } from '@admin/api'
+import type { AdminBanner, AdminCategoryNode, AdminCoupon, AdminFaq, AdminNotice, AdminProduct, AdminPromotion, AdminSeckill } from '@admin/api'
 import { useAdminStore } from '@admin/stores/admin'
 
 const admin = useAdminStore()
@@ -15,6 +15,7 @@ const notices = ref<AdminNotice[]>([])
 const couponTotal = ref(0)
 const couponPage = ref(1)
 const couponPageSize = 10
+const topCategories = ref<AdminCategoryNode[]>([])
 
 /* --------------------------------- 优惠券 --------------------------------- */
 const couponDialog = reactive({
@@ -33,8 +34,18 @@ const couponDialog = reactive({
   validEnd: '',
   validDays: 30,
   scope: 1,
+  scopeIds: [] as number[],
   status: 1,
 })
+
+async function loadTopCategories() {
+  try {
+    const tree = await adminApi.categoryApi.tree()
+    topCategories.value = tree.filter((c) => c.level === 1)
+  } catch {
+    topCategories.value = []
+  }
+}
 
 async function loadCoupons() {
   loading.value = true
@@ -66,6 +77,7 @@ function openCreateCoupon() {
     validEnd: '',
     validDays: 30,
     scope: 1,
+    scopeIds: [],
     status: 1,
   })
 }
@@ -87,6 +99,7 @@ function openEditCoupon(row: AdminCoupon) {
     validEnd: row.validEnd,
     validDays: row.validDays ?? 30,
     scope: row.scope,
+    scopeIds: row.scopeIds ?? [],
     status: row.status,
   })
 }
@@ -109,6 +122,7 @@ async function submitCoupon() {
     validEnd: couponDialog.validEnd || undefined,
     validDays: couponDialog.validDays,
     scope: couponDialog.scope,
+    scopeIds: couponDialog.scope === 1 ? [] : couponDialog.scopeIds,
     status: couponDialog.status,
   }
   try {
@@ -629,6 +643,7 @@ async function removeFaq(row: AdminFaq) {
 onMounted(() => {
   loadCoupons()
   loadBanners()
+  loadTopCategories()
   loadNotices()
   loadSeckills()
   loadProducts()
@@ -859,6 +874,17 @@ onMounted(() => {
       </template>
       <el-form-item v-else label="有效天数">
         <el-input-number v-model="couponDialog.validDays" :min="1" />
+      </el-form-item>
+      <el-form-item label="适用范围">
+        <el-radio-group v-model="couponDialog.scope">
+          <el-radio :value="1">全场通用</el-radio>
+          <el-radio :value="2">指定分类</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="couponDialog.scope === 2" label="选择分类">
+        <el-select v-model="couponDialog.scopeIds" multiple placeholder="请选择适用的一级分类" style="width: 100%">
+          <el-option v-for="c in topCategories" :key="c.id" :label="c.name" :value="c.id" />
+        </el-select>
       </el-form-item>
       <el-form-item label="状态">
         <el-switch v-model="couponDialog.status" :active-value="1" :inactive-value="0" />
