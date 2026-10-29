@@ -119,12 +119,12 @@ npm run dev:admin    # 后台管理端 → http://localhost:5174/admin/login
 | `server: dev` | 只启动后端（热重载） |
 | `web: dev` | 只启动用户端 |
 | `admin: dev` | 只启动后台管理端 |
-| `db: reset` | 重置数据库（drop→create→migrate→seed） |
+| `db:reset` | 重置数据库（drop→create→migrate→seed） |
 
 使用步骤：
 
 1. 用 IDEA 打开项目根目录 `rabbit-mark`，等待扫描完成
-2. 首次先运行一次 `db: reset` 初始化数据库
+2. 首次先运行一次 `db:reset` 初始化数据库
 3. 右上角运行下拉框选择 `Dev (server + web)`，点绿色三角
 4. 浏览器访问 http://localhost:5173
 

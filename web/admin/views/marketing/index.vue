@@ -109,6 +109,10 @@ async function submitCoupon() {
     ElMessage.warning('请输入券名称')
     return
   }
+  if (couponDialog.scope !== 1 && !couponDialog.scopeIds.length) {
+    ElMessage.warning('请选择适用的分类')
+    return
+  }
   const payload = {
     name: couponDialog.name,
     type: couponDialog.type,
@@ -667,6 +671,15 @@ onMounted(() => {
               <el-tag :type="row.type === 1 ? 'warning' : 'success'">{{ row.type === 1 ? '满减' : '折扣' }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="适用范围" width="140">
+            <template #default="{ row }">
+              <el-tag v-if="row.scope === 1" type="info">全场</el-tag>
+              <el-tag v-else-if="row.scope === 2" :type="row.scopeIds?.length ? 'success' : 'danger'">
+                指定分类{{ row.scopeIds?.length ? ` (${row.scopeIds.length})` : '（未配置）' }}
+              </el-tag>
+              <el-tag v-else type="warning">指定商品</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="面额/折扣" width="120">
             <template #default="{ row }">{{ row.type === 1 ? `¥${row.amount}` : `${(row.discountRate * 10).toFixed(1)}折` }}</template>
           </el-table-column>
@@ -885,6 +898,7 @@ onMounted(() => {
         <el-select v-model="couponDialog.scopeIds" multiple placeholder="请选择适用的一级分类" style="width: 100%">
           <el-option v-for="c in topCategories" :key="c.id" :label="c.name" :value="c.id" />
         </el-select>
+        <div class="hint">券会覆盖所选一级分类下的所有子分类；未选择分类无法保存。</div>
       </el-form-item>
       <el-form-item label="状态">
         <el-switch v-model="couponDialog.status" :active-value="1" :inactive-value="0" />

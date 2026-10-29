@@ -382,9 +382,10 @@ function buildMarketing(products, skus) {
     [7, '美妆满 199 减 40', 1, 40, 1, 199, 2, 30],
     [8, '服饰 8.8 折券', 2, 0, 0.88, 199, 2, 30],
   ].map(([id, name, type, amount, rate, minAmount, , validDays]) => {
-    // 让演示券的范围与名称一致：数码 101、美妆 105、服饰 102，其余为全场券
-    const scope = id === 3 || id === 7 || id === 8 ? 2 : 1
-    const scopeIds = id === 3 ? [101] : id === 7 ? [105] : id === 8 ? [102] : null
+    // 让演示券的范围与名称一致：数码 101、生鲜 104、家居 103、美妆 105、服饰 102，其余为全场券
+    const scope = id === 3 || id === 5 || id === 6 || id === 7 || id === 8 ? 2 : 1
+    const scopeIds =
+      id === 3 ? [101] : id === 5 ? [104] : id === 6 ? [103] : id === 7 ? [105] : id === 8 ? [102] : null
     return {
       id,
       name,
