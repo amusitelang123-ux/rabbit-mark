@@ -98,6 +98,7 @@ router.get('/config', feedback.publicConfig)
 
 /* 优惠券 */
 router.get('/coupons/center', coupon.center)
+router.get('/coupons/preview', requireAuth, coupon.preview)
 router.post('/coupons/:id/receive', requireAuth, coupon.receive)
 router.get('/user/coupons', requireAuth, coupon.mine)
 

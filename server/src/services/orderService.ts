@@ -2,7 +2,6 @@ import { Op, type WhereOptions } from 'sequelize'
 import { sequelize } from '../config/database'
 import {
   Cart,
-  Coupon,
   FinanceRecord,
   InventoryLog,
   Order,
@@ -12,7 +11,6 @@ import {
   Product,
   ProductSku,
   UserAddress,
-  UserCoupon,
 } from '../models'
 import { AppError } from '../utils/errors'
 import { ERR, FINANCE_TYPE, INVENTORY_TYPE, ORDER_STATUS } from '../constants'
@@ -20,6 +18,14 @@ import { generateNo, round2 } from '../utils/helpers'
 import { syncProductAggregate } from '../utils/productAggregate'
 import { writeOrderLog } from '../utils/orderLog'
 import { calcPromotionDiscount } from './promotionService'
+import {
+  consumeCoupon,
+  findBestCoupon,
+  findUsableCoupon,
+  restoreCoupon,
+  type CouponLine,
+  type CouponSelection,
+} from './couponService'
 import { calcFreight } from './contentService'
 import { awardForOrder } from './pointsService'
 import { releaseSeckill, reserveSeckill } from './seckillService'
@@ -114,24 +120,20 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
     // 第 5 环：运费取自后台运费模板（默认模板），未配置时回退内置规则
     const freightAmount = await calcFreight(goodsTotal, transaction)
 
-    // 第 4 环：优惠券（门槛按秒杀后商品额判定）
-    let couponAmount = 0
-    let userCoupon: UserCoupon | null = null
-    if (input.couponId) {
-      userCoupon = await UserCoupon.findOne({
-        where: { id: input.couponId, userId, status: 0 },
-        transaction,
-      })
-      if (!userCoupon) throw new AppError('优惠券不可用', ERR.COUPON_INVALID)
-      const coupon = await Coupon.findByPk(userCoupon.couponId, { transaction })
-      if (!coupon || goodsTotal < Number(coupon.minAmount)) {
-        throw new AppError('未达到优惠券使用门槛', ERR.COUPON_INVALID)
-      }
-      couponAmount =
-        coupon.type === 1
-          ? Math.min(Number(coupon.amount), goodsTotal)
-          : round2(goodsTotal * (1 - Number(coupon.discountRate)))
+    // 第 4 环：优惠券（范围/门槛/有效期都按秒杀后金额校验）
+    // couponId = 0 表示用户明确不使用；不传则由服务端自动匹配最优券。
+    const couponLines: CouponLine[] = snapshots.map((snap) => ({
+      productId: Number(snap.product!.id),
+      categoryId: Number(snap.product!.categoryId),
+      amount: snap.subtotal,
+    }))
+    let couponSelection: CouponSelection | null = null
+    if (input.couponId === undefined) {
+      couponSelection = await findBestCoupon(userId, couponLines, transaction)
+    } else if (input.couponId > 0) {
+      couponSelection = await findUsableCoupon(userId, input.couponId, couponLines, transaction)
     }
+    const couponAmount = couponSelection?.discount ?? 0
 
     // 第 3 环：满减活动，按秒杀后商品额匹配最优档位
     const promotion = await calcPromotionDiscount(goodsTotal, transaction)
@@ -152,7 +154,7 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
         couponAmount: couponAmount.toFixed(2),
         freightAmount: freightAmount.toFixed(2),
         payAmount: payAmount.toFixed(2),
-        couponId: userCoupon ? Number(userCoupon.id) : null,
+        couponId: couponSelection ? Number(couponSelection.userCoupon.id) : null,
         receiverName: address.receiver,
         receiverPhone: address.phone,
         receiverAddress: `${address.province}${address.city}${address.district}${address.detail}`,
@@ -199,11 +201,8 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
       )
     }
 
-    if (userCoupon) {
-      userCoupon.status = 1
-      userCoupon.orderId = Number(order.id)
-      userCoupon.usedAt = new Date()
-      await userCoupon.save({ transaction })
+    if (couponSelection) {
+      await consumeCoupon(couponSelection, Number(order.id), transaction)
     }
 
     await writeOrderLog(
@@ -383,6 +382,11 @@ export async function batchShip(
 
     if (order.status === ORDER_STATUS.PENDING_PAY) {
       await releaseLockedStock(Number(order.id), operator, transaction)
+      await restoreCoupon(
+        Number(order.id),
+        order.couponId ? Number(order.couponId) : null,
+        transaction,
+      )
     } else if (order.status === ORDER_STATUS.PAID) {
       const items = await OrderItem.findAll({ where: { orderId: order.id }, transaction })
       for (const item of items) {
@@ -441,12 +445,21 @@ export async function getOrder(userId: number, orderNo: string) {
 
 export async function cancelOrder(userId: number, orderNo: string) {
   return sequelize.transaction(async (transaction) => {
-    const order = await Order.findOne({ where: { orderNo, userId }, transaction })
+    const order = await Order.findOne({
+      where: { orderNo, userId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    })
     if (!order) throw AppError.notFound('订单不存在')
     if (order.status !== ORDER_STATUS.PENDING_PAY) {
       throw new AppError('当前订单状态不可取消', ERR.ORDER_STATUS_INVALID)
     }
     await releaseLockedStock(Number(order.id), `user:${userId}`, transaction)
+    await restoreCoupon(
+      Number(order.id),
+      order.couponId ? Number(order.couponId) : null,
+      transaction,
+    )
     order.status = ORDER_STATUS.CLOSED
     order.closeTime = new Date()
     await order.save({ transaction })
@@ -586,12 +599,27 @@ async function releaseLockedStock(
 /** 待支付订单超时自动关单（定时任务调用） */
 export async function closeExpiredOrders(minutes = 30) {
   const deadline = new Date(Date.now() - minutes * 60 * 1000)
-  const expired = await Order.findAll({
+  const candidates = await Order.findAll({
     where: { status: ORDER_STATUS.PENDING_PAY, createdAt: { [Op.lt]: deadline } },
   })
-  for (const order of expired) {
-    await sequelize.transaction(async (transaction) => {
+
+  let closed = 0
+  for (const candidate of candidates) {
+    const didClose = await sequelize.transaction(async (transaction) => {
+      // 事务内重新加锁并确认仍是待付款，避免与支付回调/用户取消互相覆盖
+      const order = await Order.findOne({
+        where: { id: candidate.id, status: ORDER_STATUS.PENDING_PAY },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      })
+      if (!order) return false
+
       await releaseLockedStock(Number(order.id), 'system:auto-close', transaction)
+      await restoreCoupon(
+        Number(order.id),
+        order.couponId ? Number(order.couponId) : null,
+        transaction,
+      )
       order.status = ORDER_STATUS.CLOSED
       order.closeTime = new Date()
       await order.save({ transaction })
@@ -602,7 +630,9 @@ export async function closeExpiredOrders(minutes = 30) {
         `待支付超 ${minutes} 分钟自动关闭`,
         transaction,
       )
+      return true
     })
+    if (didClose) closed += 1
   }
-  return expired.length
+  return closed
 }

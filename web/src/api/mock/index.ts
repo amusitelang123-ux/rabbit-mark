@@ -1,4 +1,4 @@
-import type { Address, CommentItem, Coupon, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Refund } from '../types'
+import type { Address, CommentItem, Coupon, CouponPreviewResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Refund } from '../types'
 import type {
   AddressPayload,
   ApplyRefundPayload,
@@ -156,6 +156,20 @@ export const mockApi: ClientApi = {
 
   couponApi: {
     center: (): Promise<Coupon[]> => delay(mockCoupons.filter((c) => c.status === 0)),
+    preview: (): Promise<CouponPreviewResult> => {
+      const list = mockCoupons
+        .filter((c) => c.status === 0)
+        .map((c) => ({
+          ...c,
+          discount:
+            c.type === 1
+              ? c.amount
+              : Math.round(c.minAmount * (1 - c.discountRate) * 100) / 100,
+          eligibleAmount: c.minAmount,
+        }))
+        .sort((a, b) => b.discount - a.discount)
+      return delay({ list, bestCouponId: list[0]?.id ?? null })
+    },
     mine: (): Promise<Coupon[]> => delay(mockCoupons),
     receive: (id: number) => delay({ id: Date.now(), couponId: id }),
   },

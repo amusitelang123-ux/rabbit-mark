@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { Brand, Category, CommentItem, Coupon, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, UserInfo, Notice } from '../types'
+import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, UserInfo, Notice } from '../types'
 import type {
   AddressPayload,
   CartAddPayload,
@@ -62,6 +62,7 @@ export const realApi: ClientApi = {
 
   couponApi: {
     center: () => http.get<Coupon[]>('/coupons/center'),
+    preview: () => http.get<CouponPreviewResult>('/coupons/preview'),
     mine: () => http.get<Coupon[]>('/user/coupons'),
     receive: (id) => http.post<{ id: number; couponId: number }>(`/coupons/${id}/receive`),
   },

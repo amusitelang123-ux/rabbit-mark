@@ -7,7 +7,8 @@ import { toInt } from '../../utils/helpers'
 
 const createSchema = z.object({
   addressId: z.number().int().positive().optional(),
-  couponId: z.number().int().positive().optional(),
+  // 0 = 明确不使用优惠券；不传 = 服务端自动匹配最优券
+  couponId: z.number().int().min(0).optional(),
   remark: z.string().max(255).optional(),
   source: z.number().int().optional(),
 })

@@ -186,9 +186,31 @@ export interface Coupon {
   amount: number
   discountRate: number
   minAmount: number
+  scope?: number
+  scopeIds?: number[]
   scopeText: string
+  validType?: number
+  validStart?: string
+  validEnd?: string
+  validDays?: number | null
   validText: string
+  totalCount?: number
+  receivedCount?: number
+  usedCount?: number
+  remainCount?: number | null
+  expireAt?: string
   status: 0 | 1 | 2
+}
+
+/** 结算页预览券：discount 由后端按当前购物车真实计算 */
+export interface CouponPreview extends Coupon {
+  discount: number
+  eligibleAmount: number
+}
+
+export interface CouponPreviewResult {
+  list: CouponPreview[]
+  bestCouponId: number | null
 }
 
 export interface SeckillProduct {

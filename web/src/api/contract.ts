@@ -6,6 +6,7 @@ import type {
   Category,
   CommentItem,
   Coupon,
+  CouponPreviewResult,
   Order,
   PageResult,
   PayChannel,
@@ -120,6 +121,8 @@ export interface ClientApi {
   }
   couponApi: {
     center(): Promise<Coupon[]>
+    /** 按当前选中购物车计算可用券、真实抵扣额与最优券 */
+    preview(): Promise<CouponPreviewResult>
     mine(): Promise<Coupon[]>
     receive(id: number): Promise<{ id: number; couponId: number }>
   }
