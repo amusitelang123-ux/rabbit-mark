@@ -413,16 +413,20 @@ function buildMarketing(products, skus) {
   const seckillProducts = skus
     .filter((s) => s.id % 100 === 0)
     .slice(0, 8)
-    .map((sku, i) => ({
-      activity_id: 1,
-      product_id: sku.product_id,
-      sku_id: sku.id,
-      seckill_price: (Number(sku.price) * 0.68).toFixed(2),
-      seckill_stock: 50 + ((i * 17) % 120),
-      sold_count: 30 + ((i * 23) % 200),
-      limit_per_user: 2,
-      sort: i + 1,
-    }))
+    .map((sku, i) => {
+      const seckillStock = 50 + ((i * 17) % 120)
+      return {
+        activity_id: 1,
+        product_id: sku.product_id,
+        sku_id: sku.id,
+        seckill_price: (Number(sku.price) * 0.68).toFixed(2),
+        seckill_stock: seckillStock,
+        // 已售数量不能超过秒杀库存，否则剩余名额为负，下单会被误判「秒杀库存不足」
+        sold_count: Math.min(seckillStock, 30 + ((i * 23) % 200)),
+        limit_per_user: 2,
+        sort: i + 1,
+      }
+    })
 
   const seckillActivities = [
     {

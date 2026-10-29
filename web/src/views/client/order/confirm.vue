@@ -31,23 +31,29 @@ const items = computed(() => cart.selectedItems)
 /** 商品原价总额 */
 const goodsTotal = computed(() => cart.selectedTotal)
 
-/* 秒杀：skuId -> 秒杀价，与后端一致按 SKU 匹配进行中的活动 */
+/* 秒杀：skuId -> 秒杀价与剩余名额，与后端一致按 SKU 匹配进行中的活动 */
 const activeSeckills = ref<ActiveSeckill[]>([])
-const seckillPriceMap = computed(() => {
-  const map = new Map<number, number>()
+const seckillMap = computed(() => {
+  const map = new Map<number, { price: number; remaining: number }>()
   for (const act of activeSeckills.value) {
-    for (const p of act.products) map.set(p.skuId, p.seckillPrice)
+    for (const p of act.products) map.set(p.skuId, { price: p.seckillPrice, remaining: p.remaining })
   }
   return map
 })
+/** 秒杀名额不足时后端按原价成交，这里同步不预览优惠，避免显示价与实付价不一致 */
+function seckillDiscount(item: { skuId: number; quantity: number; price: number }): number {
+  const sk = seckillMap.value.get(item.skuId)
+  if (!sk || sk.remaining < item.quantity || sk.price >= item.price) return 0
+  return (item.price - sk.price) * item.quantity
+}
+/** 参与了秒杀但名额已抢完（或不够买）：展示提示，按原价结算 */
+function isSeckillSoldOut(item: { skuId: number; quantity: number }): boolean {
+  const sk = seckillMap.value.get(item.skuId)
+  return Boolean(sk && sk.remaining < item.quantity)
+}
 const seckillAmount = computed(() => {
   let total = 0
-  for (const item of items.value) {
-    const seckillPrice = seckillPriceMap.value.get(item.skuId)
-    if (seckillPrice != null && seckillPrice < item.price) {
-      total += (item.price - seckillPrice) * item.quantity
-    }
-  }
+  for (const item of items.value) total += seckillDiscount(item)
   return Math.round(total * 100) / 100
 })
 /** 秒杀后商品额，后续满减/券/运费均以此为基数（与后端一致） */
@@ -177,6 +183,9 @@ onMounted(async () => {
                   <div>
                     <router-link :to="`/product/${it.productId}`" class="items__name">{{ it.name }}</router-link>
                     <p class="muted">{{ it.specText }}</p>
+                    <p v-if="isSeckillSoldOut(it)" class="items__seckill-hint">
+                      秒杀名额不足，将按原价结算
+                    </p>
                   </div>
                 </div>
                 <span>¥{{ formatMoney(it.price) }}</span>
@@ -362,6 +371,11 @@ onMounted(async () => {
 }
 .items__name:hover {
   color: var(--amz-link-hover);
+}
+.items__seckill-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #c0392b;
 }
 .items__subtotal {
   color: var(--amz-price);

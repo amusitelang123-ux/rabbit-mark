@@ -126,8 +126,10 @@ export interface SeckillReservation {
 }
 
 /**
- * 下单时校验并预扣秒杀库存。
- * 校验项：剩余库存充足、未超每人限购；通过后 sold_count += quantity（同事务行锁）。
+ * 下单时尝试占用秒杀名额：
+ *   - 没有进行中的秒杀，或名额不足（含 sold_count > seckill_stock 的脏数据）→ 返回 null，按原价成交；
+ *   - 超出每人限购 → 抛出业务错误；
+ *   - 通过 → sold_count += quantity（同事务行锁，防超卖）。
  */
 export async function reserveSeckill(
   userId: number,
@@ -139,14 +141,20 @@ export async function reserveSeckill(
   const seckill = await findActiveSeckill(productId, skuId, transaction)
   if (!seckill) return null
 
-  const remaining = seckill.seckillStock - seckill.soldCount
+  // 剩余名额按 0 兜底：历史数据可能把 sold_count 记成大于 seckill_stock
+  const remaining = Math.max(0, seckill.seckillStock - seckill.soldCount)
   if (remaining < quantity) {
-    throw new AppError('秒杀库存不足', ERR.STOCK_NOT_ENOUGH)
+    // 秒杀名额（含超卖/脏数据导致的负剩余）不足时按原价成交。
+    // 秒杀只是限时优惠，商品自身库存充足，不能因为秒杀名额用完就让整个订单无法提交。
+    return null
   }
 
   const bought = await countUserSeckillBought(userId, Number(seckill.id), transaction)
   if (bought + quantity > seckill.limitPerUser) {
-    throw new AppError(`该秒杀商品每人限购 ${seckill.limitPerUser} 件`, ERR.PARAM)
+    throw new AppError(
+      `该秒杀商品每人限购 ${seckill.limitPerUser} 件，您已购买 ${bought} 件`,
+      ERR.PARAM,
+    )
   }
 
   seckill.soldCount += quantity

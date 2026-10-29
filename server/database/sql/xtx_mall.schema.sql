@@ -464,7 +464,8 @@ CREATE TABLE IF NOT EXISTS `seckill_products` (
   `sort` INT NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   KEY `idx_activity` (`activity_id`),
-  KEY `idx_product` (`product_id`)
+  KEY `idx_product` (`product_id`),
+  CONSTRAINT `chk_seckill_sold_count` CHECK (`sold_count` >= 0 AND `sold_count` <= `seckill_stock`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='秒杀商品表';
 
 CREATE TABLE IF NOT EXISTS `promotions` (
