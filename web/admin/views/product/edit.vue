@@ -38,8 +38,17 @@ const saving = ref(false)
 const skus = ref<AdminSku[]>([])
 const skuSaving = ref<number | null>(null)
 
-const specGroups = ref<{ name: string; values: string[] }[]>([])
+interface SpecGroupDraft {
+  name: string
+  values: string[]
+  /** 规格值输入框的草稿值，必须走 v-model：el-input 的输入事件会把 DOM 值同步回 modelValue，缺 v-model 时每次输入都会被重置为空 */
+  input: string
+}
+
+const specGroups = ref<SpecGroupDraft[]>([])
 const generating = ref(false)
+/** 规格组是否已用已有 SKU 回填过（保存商品会重置详情，不能把正在编辑的规格组冲掉） */
+let specGroupsRestored = false
 
 const flatCategories = computed(() => {
   const out: { id: number; label: string }[] = []
@@ -77,21 +86,64 @@ function applyTemplate(group: SpecGroupItem) {
     ElMessage.info('该规格组已添加')
     return
   }
-  specGroups.value.push({ name: group.name, values: [...group.values] })
+  specGroups.value.push({ name: group.name, values: [...group.values], input: '' })
 }
 
 function addSpecGroup() {
-  specGroups.value.push({ name: '', values: [] })
+  specGroups.value.push({ name: '', values: [], input: '' })
 }
 
-function addSpecValue(group: { name: string; values: string[] }, value: string) {
-  const v = value.trim()
-  if (!v || group.values.includes(v)) return
-  group.values.push(v)
+/** 回车提交输入框里的规格值 */
+function commitSpecValue(group: SpecGroupDraft, event?: Event) {
+  // 中文输入法选词时的回车（isComposing / keyCode 229）不提交，避免把拼音当成规格值
+  const e = event as KeyboardEvent | undefined
+  if (e?.isComposing || e?.keyCode === 229) return
+
+  const value = group.input.trim()
+  if (!value) {
+    group.input = ''
+    return
+  }
+  if (group.values.includes(value)) {
+    ElMessage.info(`规格值「${value}」已存在`)
+  } else {
+    group.values.push(value)
+  }
+  group.input = ''
 }
 
 function removeSpecValue(group: { values: string[] }, index: number) {
   group.values.splice(index, 1)
+}
+
+/** 从已有 SKU 的规格组合还原规格组，打开编辑页时可直接在原有规格上增删 */
+function specGroupsFromSkus(rows: AdminSku[]): SpecGroupDraft[] {
+  const names: string[] = []
+  const values = new Map<string, string[]>()
+
+  for (const row of rows) {
+    for (const [name, raw] of Object.entries(row.spec ?? {})) {
+      const value = String(raw ?? '').trim()
+      if (!name || !value) continue
+      let list = values.get(name)
+      if (!list) {
+        list = []
+        values.set(name, list)
+        names.push(name)
+      }
+      if (!list.includes(value)) list.push(value)
+    }
+  }
+
+  // MySQL 的 JSON 列会重排对象键，这里用 specText 中规格值首次出现的位置还原规格组顺序
+  const sampleText = rows.find((r) => r.specText)?.specText ?? ''
+  const ordered = names.map((name) => ({
+    name,
+    pos: sampleText ? sampleText.indexOf(values.get(name)![0]) : -1,
+  }))
+  if (ordered.every((item) => item.pos >= 0)) ordered.sort((a, b) => a.pos - b.pos)
+
+  return ordered.map(({ name }) => ({ name, values: values.get(name)!, input: '' }))
 }
 
 async function loadDetail() {
@@ -112,6 +164,10 @@ async function loadDetail() {
     attributes: p.attributes.map((a) => ({ name: a.name, value: a.value })),
   })
   skus.value = p.skus
+  if (!specGroupsRestored) {
+    specGroups.value = specGroupsFromSkus(p.skus)
+    specGroupsRestored = true
+  }
 }
 
 async function save() {
@@ -153,9 +209,26 @@ async function save() {
 }
 
 async function generate() {
-  const groups = specGroups.value.filter((g) => g.name && g.values.length)
+  // 只提交真正填写过的规格组；名字/规格值缺失时明确提示，避免静默忽略后生成空 SKU
+  const groups = specGroups.value
+    .map((g) => ({ name: g.name.trim(), values: [...g.values] }))
+    .filter((g) => g.name || g.values.length)
   if (!groups.length) {
     ElMessage.warning('请先添加规格组与规格值')
+    return
+  }
+  const missingName = groups.find((g) => !g.name)
+  if (missingName) {
+    ElMessage.warning('请填写规格组名称')
+    return
+  }
+  const missingValue = groups.find((g) => !g.values.length)
+  if (missingValue) {
+    ElMessage.warning(`规格组「${missingValue.name}」还没有规格值`)
+    return
+  }
+  if (new Set(groups.map((g) => g.name)).size !== groups.length) {
+    ElMessage.warning('规格组名称不能重复')
     return
   }
   generating.value = true
@@ -363,9 +436,10 @@ onMounted(async () => {
         <div class="spec-values">
           <el-tag v-for="(v, vi) in g.values" :key="vi" closable @close="removeSpecValue(g, vi)">{{ v }}</el-tag>
           <el-input
+            v-model="g.input"
             placeholder="输入后回车添加"
             style="width: 150px"
-            @keyup.enter="(e: KeyboardEvent) => { const t = e.target as HTMLInputElement; addSpecValue(g, t.value); t.value = '' }"
+            @keydown.enter="commitSpecValue(g, $event)"
           />
         </div>
         <el-button link type="danger" @click="specGroups.splice(gi, 1)">移除</el-button>
