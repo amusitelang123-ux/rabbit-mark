@@ -89,7 +89,7 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
         throw new AppError(`「${product.name}」库存不足`, ERR.STOCK_NOT_ENOUGH)
       }
 
-      // 第 2 环：秒杀价（同事务行锁预扣秒杀库存，并校验每人限购）
+      // 第 2 环：秒杀价（名额足够时同事务行锁预扣；名额不足则按原价成交，不阻断下单）
       const seckill = await reserveSeckill(
         userId,
         Number(product.id),

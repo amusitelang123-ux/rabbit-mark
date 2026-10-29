@@ -217,7 +217,8 @@ export function toSeckillDto(item: SeckillProduct & { product?: Product | null }
     image: product?.mainImage ?? '',
     price: num(item.seckillPrice),
     originPrice: num(product?.priceMin ?? item.seckillPrice),
-    stock: item.seckillStock - item.soldCount,
+    // 剩余名额按 0 兜底，避免脏数据（sold_count > seckill_stock）算出负库存
+    stock: Math.max(0, item.seckillStock - item.soldCount),
     soldCount: item.soldCount,
   }
 }

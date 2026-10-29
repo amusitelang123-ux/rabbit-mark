@@ -1,6 +1,6 @@
 import { Op, type Transaction, type WhereOptions } from 'sequelize'
 import { sequelize } from '../config/database'
-import { Banner, Category, Coupon, Notice, Product, Promotion, SeckillActivity, SeckillProduct, UserCoupon } from '../models'
+import { Banner, Category, Coupon, Notice, Product, ProductSku, Promotion, SeckillActivity, SeckillProduct, UserCoupon } from '../models'
 import { AppError } from '../utils/errors'
 import { ERR } from '../constants'
 import { formatDate } from '../utils/serializers'
@@ -470,6 +470,74 @@ export async function listSeckills() {
   return result
 }
 
+/** 校验并归一化秒杀活动时间区间 */
+function normalizeSeckillTime(
+  startTime: string | Date,
+  endTime: string | Date,
+): { startTime: Date; endTime: Date } {
+  const start = startTime instanceof Date ? startTime : new Date(startTime)
+  const end = endTime instanceof Date ? endTime : new Date(endTime)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new AppError('秒杀活动时间不合法', ERR.PARAM)
+  }
+  if (end.getTime() <= start.getTime()) {
+    throw new AppError('秒杀结束时间必须晚于开始时间', ERR.PARAM)
+  }
+  return { startTime: start, endTime: end }
+}
+
+/**
+ * 校验秒杀商品配置：库存/限购必须为正整数，秒杀价必须低于 SKU 原价；
+ * 编辑已有商品时秒杀库存不能小于已售数量——否则 sold_count 会超过 seckill_stock，
+ * 下单时会被误判为「秒杀库存不足」，商品在活动期间将完全无法购买。
+ */
+async function assertSeckillProducts(
+  products: SeckillProductInput[],
+  existingBySku: Map<number, SeckillProduct>,
+  transaction: Transaction,
+): Promise<void> {
+  const seen = new Set<number>()
+  for (const p of products) {
+    const productId = Number(p.productId)
+    const skuId = Number(p.skuId)
+    if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(skuId) || skuId <= 0) {
+      throw new AppError('秒杀商品必须选择有效的商品与 SKU', ERR.PARAM)
+    }
+    if (seen.has(skuId)) throw new AppError(`SKU ${skuId} 在本次活动里重复配置`, ERR.PARAM)
+    seen.add(skuId)
+
+    const seckillStock = Number(p.seckillStock)
+    if (!Number.isInteger(seckillStock) || seckillStock < 1) {
+      throw new AppError('秒杀库存必须为大于 0 的整数', ERR.PARAM)
+    }
+    const limitPerUser = Number(p.limitPerUser ?? 1)
+    if (!Number.isInteger(limitPerUser) || limitPerUser < 1) {
+      throw new AppError('每人限购必须为大于 0 的整数', ERR.PARAM)
+    }
+    const seckillPrice = Number(p.seckillPrice)
+    if (!Number.isFinite(seckillPrice) || seckillPrice <= 0) {
+      throw new AppError('秒杀价必须大于 0', ERR.PARAM)
+    }
+
+    const sku = await ProductSku.findOne({ where: { id: skuId, productId }, transaction })
+    if (!sku || sku.status !== 1) throw new AppError(`SKU ${skuId} 不存在或已停用`, ERR.PARAM)
+    if (seckillPrice >= Number(sku.price)) {
+      throw new AppError(
+        `SKU ${skuId} 的秒杀价必须低于原价 ¥${Number(sku.price).toFixed(2)}`,
+        ERR.PARAM,
+      )
+    }
+
+    const soldCount = existingBySku.get(skuId)?.soldCount ?? 0
+    if (seckillStock < soldCount) {
+      throw new AppError(
+        `SKU ${skuId} 已售 ${soldCount} 件，秒杀库存不能小于已售数量`,
+        ERR.PARAM,
+      )
+    }
+  }
+}
+
 /**
  * 校验秒杀商品是否与其它「启用且时间重叠」的活动冲突。
  * 同一 SKU 在同一时段只允许存在一个秒杀价，否则下单取价不确定。
@@ -511,24 +579,22 @@ async function assertNoSeckillConflict(
 
 export async function createSeckill(input: SeckillInput) {
   return sequelize.transaction(async (transaction) => {
-    await assertNoSeckillConflict(
-      input.products ?? [],
-      new Date(input.startTime),
-      new Date(input.endTime),
-      null,
-      transaction,
-    )
+    const { startTime, endTime } = normalizeSeckillTime(input.startTime, input.endTime)
+    const products = input.products ?? []
+    await assertSeckillProducts(products, new Map(), transaction)
+    await assertNoSeckillConflict(products, startTime, endTime, null, transaction)
+
     const activity = await SeckillActivity.create(
       {
         name: input.name,
-        startTime: new Date(input.startTime),
-        endTime: new Date(input.endTime),
+        startTime,
+        endTime,
         status: input.status ?? 0,
       },
       { transaction },
     )
-    for (let i = 0; i < (input.products ?? []).length; i++) {
-      const p = input.products![i]
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i]
       await SeckillProduct.create(
         {
           activityId: Number(activity.id),
@@ -551,38 +617,56 @@ export async function updateSeckill(id: number, input: Partial<SeckillInput>) {
     const activity = await SeckillActivity.findByPk(id, { transaction })
     if (!activity) throw AppError.notFound('秒杀活动不存在')
 
+    const { startTime, endTime } = normalizeSeckillTime(
+      input.startTime ?? activity.startTime,
+      input.endTime ?? activity.endTime,
+    )
+
+    const existing = await SeckillProduct.findAll({ where: { activityId: id }, transaction })
+    const existingBySku = new Map(existing.map((row) => [Number(row.skuId), row]))
+
     if (input.products) {
-      await assertNoSeckillConflict(
-        input.products,
-        new Date(input.startTime ?? activity.startTime),
-        new Date(input.endTime ?? activity.endTime),
-        id,
-        transaction,
-      )
+      await assertSeckillProducts(input.products, existingBySku, transaction)
+      await assertNoSeckillConflict(input.products, startTime, endTime, id, transaction)
     }
 
     if (input.name !== undefined) activity.name = input.name
-    if (input.startTime !== undefined) activity.startTime = new Date(input.startTime)
-    if (input.endTime !== undefined) activity.endTime = new Date(input.endTime)
+    activity.startTime = startTime
+    activity.endTime = endTime
     if (input.status !== undefined) activity.status = input.status
     await activity.save({ transaction })
 
     if (input.products) {
-      await SeckillProduct.destroy({ where: { activityId: id }, transaction })
+      // 就地更新，而不是删除后重建：保留 seckill_products.id 与 sold_count，
+      // 否则编辑活动会把已售数量/限购重置，历史订单取消时也找不到对应行来释放库存。
+      const keep = new Set(input.products.map((p) => Number(p.skuId)))
+      for (const row of existing) {
+        if (!keep.has(Number(row.skuId))) await row.destroy({ transaction })
+      }
       for (let i = 0; i < input.products.length; i++) {
         const p = input.products[i]
-        await SeckillProduct.create(
-          {
-            activityId: id,
-            productId: p.productId,
-            skuId: p.skuId,
-            seckillPrice: p.seckillPrice.toFixed(2),
-            seckillStock: p.seckillStock,
-            limitPerUser: p.limitPerUser ?? 1,
-            sort: p.sort ?? i,
-          },
-          { transaction },
-        )
+        const row = existingBySku.get(Number(p.skuId))
+        if (row) {
+          row.productId = p.productId
+          row.seckillPrice = p.seckillPrice.toFixed(2)
+          row.seckillStock = p.seckillStock
+          row.limitPerUser = p.limitPerUser ?? row.limitPerUser
+          row.sort = p.sort ?? i
+          await row.save({ transaction })
+        } else {
+          await SeckillProduct.create(
+            {
+              activityId: id,
+              productId: p.productId,
+              skuId: p.skuId,
+              seckillPrice: p.seckillPrice.toFixed(2),
+              seckillStock: p.seckillStock,
+              limitPerUser: p.limitPerUser ?? 1,
+              sort: p.sort ?? i,
+            },
+            { transaction },
+          )
+        }
       }
     }
     return { id: Number(activity.id) }

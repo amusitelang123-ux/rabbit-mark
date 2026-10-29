@@ -373,7 +373,7 @@ function openCreateSeckill() {
     startTime: '',
     endTime: '',
     status: 0,
-    rows: [{ productId: undefined, skuId: undefined, seckillPrice: 0, seckillStock: 0, limitPerUser: 1 }],
+    rows: [{ productId: undefined, skuId: undefined, seckillPrice: 0, seckillStock: 1, limitPerUser: 1 }],
   })
 }
 
@@ -397,7 +397,7 @@ function openEditSeckill(row: AdminSeckill) {
 }
 
 function addSeckillRow() {
-  seckillDialog.rows.push({ productId: undefined, skuId: undefined, seckillPrice: 0, seckillStock: 0, limitPerUser: 1 })
+  seckillDialog.rows.push({ productId: undefined, skuId: undefined, seckillPrice: 0, seckillStock: 1, limitPerUser: 1 })
 }
 
 async function submitSeckill() {
@@ -974,7 +974,7 @@ onMounted(() => {
                 <el-option v-for="s in skusOf(r.productId)" :key="s.id" :label="s.specText || s.skuCode" :value="s.id" />
               </el-select>
               <el-input-number v-model="r.seckillPrice" :min="0" :precision="2" placeholder="秒杀价" style="width: 130px" />
-              <el-input-number v-model="r.seckillStock" :min="0" placeholder="库存" style="width: 120px" />
+              <el-input-number v-model="r.seckillStock" :min="1" placeholder="库存" style="width: 120px" />
               <el-button link type="danger" @click="seckillDialog.rows.splice(i, 1)">删除</el-button>
             </div>
             <el-button link type="primary" @click="addSeckillRow">+ 添加商品</el-button>
