@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@admin/api'
-import type { AdminBanner, AdminCategoryNode, AdminCoupon, AdminFaq, AdminNotice, AdminProduct, AdminPromotion, AdminSeckill } from '@admin/api'
+import type { AdminBanner, AdminCategoryNode, AdminCoupon, AdminFaq, AdminNotice, AdminProduct, AdminPromotion, AdminSeckill, MarketingActivityStats } from '@admin/api'
 import { useAdminStore } from '@admin/stores/admin'
 
 const admin = useAdminStore()
@@ -36,6 +36,7 @@ const couponDialog = reactive({
   scope: 1,
   scopeIds: [] as number[],
   status: 1,
+  isNewUser: false,
 })
 
 async function loadTopCategories() {
@@ -79,6 +80,7 @@ function openCreateCoupon() {
     scope: 1,
     scopeIds: [],
     status: 1,
+    isNewUser: false,
   })
 }
 
@@ -101,6 +103,7 @@ function openEditCoupon(row: AdminCoupon) {
     scope: row.scope,
     scopeIds: row.scopeIds ?? [],
     status: row.status,
+    isNewUser: Boolean(row.isNewUser),
   })
 }
 
@@ -128,6 +131,7 @@ async function submitCoupon() {
     scope: couponDialog.scope,
     scopeIds: couponDialog.scope === 1 ? [] : couponDialog.scopeIds,
     status: couponDialog.status,
+    isNewUser: couponDialog.isNewUser,
   }
   try {
     if (couponDialog.mode === 'create') await adminApi.marketingApi.createCoupon(payload)
@@ -458,18 +462,27 @@ async function removeSeckill(row: AdminSeckill) {
   }
 }
 
-/* -------------------------------- 满减活动 -------------------------------- */
+/* -------------------------------- 满减/满赠活动 -------------------------------- */
 const promotions = ref<AdminPromotion[]>([])
+
+type PromotionThresholdDraft = {
+  amount: number
+  reduce?: number
+  giftProductId?: number
+  giftSkuId?: number
+  giftQuantity?: number
+}
 
 const promotionDialog = reactive({
   visible: false,
   mode: 'create' as 'create' | 'edit',
   id: 0,
   name: '',
+  type: 1 as 1 | 2,
   startTime: '',
   endTime: '',
   status: 1,
-  thresholds: [] as { amount: number; reduce: number }[],
+  thresholds: [] as PromotionThresholdDraft[],
 })
 
 async function loadPromotions() {
@@ -486,6 +499,7 @@ function openCreatePromotion() {
     mode: 'create',
     id: 0,
     name: '',
+    type: 1,
     startTime: '',
     endTime: '',
     status: 1,
@@ -499,6 +513,7 @@ function openEditPromotion(row: AdminPromotion) {
     mode: 'edit',
     id: row.id,
     name: row.name,
+    type: row.type === 2 ? 2 : 1,
     startTime: row.startTime,
     endTime: row.endTime,
     status: row.status,
@@ -506,12 +521,40 @@ function openEditPromotion(row: AdminPromotion) {
   })
 }
 
+/** 切换活动类型时重置档位结构，避免满减档位被当成满赠提交 */
+function onPromotionTypeChange(value: string | number | boolean | undefined) {
+  const type = Number(value)
+  promotionDialog.type = type === 2 ? 2 : 1
+  promotionDialog.thresholds =
+    type === 2
+      ? [{ amount: 199, reduce: 0, giftQuantity: 1 }]
+      : [{ amount: 199, reduce: 20 }]
+}
+
 function addThreshold() {
-  promotionDialog.thresholds.push({ amount: 0, reduce: 0 })
+  promotionDialog.thresholds.push(
+    promotionDialog.type === 2
+      ? { amount: 0, reduce: 0, giftQuantity: 1 }
+      : { amount: 0, reduce: 0 },
+  )
+}
+
+function giftLabel(t: PromotionThresholdDraft): string {
+  const product = productOptions.value.find((p) => p.id === t.giftProductId)
+  if (!product) return t.giftSkuId ? `SKU ${t.giftSkuId}` : '未选择赠品'
+  const sku = product.skus.find((s) => s.id === t.giftSkuId)
+  return `${product.name}${sku ? `（${sku.specText || sku.skuCode}）` : ''}`
 }
 
 function thresholdText(row: AdminPromotion) {
-  return row.thresholds.map((t) => `满 ${t.amount} 减 ${t.reduce}`).join(' / ') || '—'
+  const text = row.thresholds
+    .map((t) =>
+      row.type === 2
+        ? `满 ${t.amount} 赠 ${giftLabel(t)} ×${t.giftQuantity ?? 1}`
+        : `满 ${t.amount} 减 ${t.reduce ?? 0}`,
+    )
+    .join(' / ')
+  return text || '—'
 }
 
 async function submitPromotion() {
@@ -519,15 +562,20 @@ async function submitPromotion() {
     ElMessage.warning('请填写活动名称与起止时间')
     return
   }
-  const thresholds = promotionDialog.thresholds.filter((t) => t.amount > 0 && t.reduce > 0)
-  if (!thresholds.length) {
-    ElMessage.warning('至少配置一个有效的满减档位')
+  const valid =
+    promotionDialog.type === 2
+      ? promotionDialog.thresholds.filter(
+          (t) => t.amount > 0 && t.giftSkuId && (t.giftQuantity ?? 0) > 0,
+        )
+      : promotionDialog.thresholds.filter((t) => t.amount > 0 && (t.reduce ?? 0) > 0)
+  if (!valid.length) {
+    ElMessage.warning(promotionDialog.type === 2 ? '至少配置一个有效赠品档位' : '至少配置一个有效满减档位')
     return
   }
   const payload = {
     name: promotionDialog.name,
-    type: 1,
-    thresholds,
+    type: promotionDialog.type,
+    thresholds: valid,
     startTime: promotionDialog.startTime,
     endTime: promotionDialog.endTime,
     status: promotionDialog.status,
@@ -644,6 +692,17 @@ async function removeFaq(row: AdminFaq) {
   }
 }
 
+/* -------------------------------- 活动数据（A-45） -------------------------------- */
+const activityStats = ref<MarketingActivityStats | null>(null)
+
+async function loadActivityStats() {
+  try {
+    activityStats.value = await adminApi.statsApi.marketing()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '活动数据加载失败')
+  }
+}
+
 onMounted(() => {
   loadCoupons()
   loadBanners()
@@ -653,6 +712,7 @@ onMounted(() => {
   loadProducts()
   loadPromotions()
   loadFaqs()
+  loadActivityStats()
 })
 </script>
 
@@ -665,7 +725,12 @@ onMounted(() => {
         </div>
         <el-table v-loading="loading" :data="coupons" stripe>
           <el-table-column label="ID" prop="id" width="70" />
-          <el-table-column label="名称" prop="name" min-width="150" />
+          <el-table-column label="名称" min-width="150">
+            <template #default="{ row }">
+              <span>{{ row.name }}</span>
+              <el-tag v-if="row.isNewUser" type="danger" size="small" class="new-user-tag">新人券</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="类型" width="90">
             <template #default="{ row }">
               <el-tag :type="row.type === 1 ? 'warning' : 'success'">{{ row.type === 1 ? '满减' : '折扣' }}</el-tag>
@@ -792,15 +857,20 @@ onMounted(() => {
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="满减活动" name="promotion">
+      <el-tab-pane label="满减/满赠" name="promotion">
         <div class="pane-head">
-          <el-button v-if="admin.hasPerm('marketing:create')" type="primary" @click="openCreatePromotion">新增满减活动</el-button>
-          <span class="hint">下单时自动匹配「满足门槛中减免最大」的档位，与优惠券可叠加</span>
+          <el-button v-if="admin.hasPerm('marketing:create')" type="primary" @click="openCreatePromotion">新增促销活动</el-button>
+          <span class="hint">满减自动匹配最优档位；满赠命中门槛自动加赠品（每单一份，缺货则放弃赠品）</span>
         </div>
         <el-table :data="promotions" stripe>
           <el-table-column label="ID" prop="id" width="70" />
           <el-table-column label="活动名称" prop="name" min-width="150" />
-          <el-table-column label="满减规则" min-width="240">
+          <el-table-column label="类型" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.type === 2 ? 'danger' : 'warning'">{{ row.type === 2 ? '满赠' : '满减' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="活动规则" min-width="260">
             <template #default="{ row }">{{ thresholdText(row) }}</template>
           </el-table-column>
           <el-table-column label="开始时间" prop="startTime" width="170" />
@@ -842,6 +912,83 @@ onMounted(() => {
             </template>
           </el-table-column>
         </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="活动数据" name="stats">
+        <div class="stat-cards">
+          <div class="stat-card">
+            <span>满减/满赠让利</span>
+            <b>¥{{ activityStats?.promotionSummary.discountTotal ?? 0 }}</b>
+          </div>
+          <div class="stat-card">
+            <span>涉及订单</span>
+            <b>{{ activityStats?.promotionSummary.orderCount ?? 0 }} 单</b>
+          </div>
+          <div class="stat-card">
+            <span>优惠券带动 GMV</span>
+            <b>¥{{ (activityStats?.coupons ?? []).reduce((sum, c) => sum + c.gmv, 0).toFixed(2) }}</b>
+          </div>
+          <div class="stat-card">
+            <span>秒杀带动 GMV</span>
+            <b>¥{{ (activityStats?.seckills ?? []).reduce((sum, s) => sum + s.gmv, 0).toFixed(2) }}</b>
+          </div>
+        </div>
+
+        <h4 class="stats-title">优惠券效果</h4>
+        <el-table :data="activityStats?.coupons ?? []" stripe size="small">
+          <el-table-column label="ID" prop="id" width="65" />
+          <el-table-column label="券名称" prop="name" min-width="150" />
+          <el-table-column label="类型" width="80">
+            <template #default="{ row }">{{ row.type === 1 ? '满减' : '折扣' }}</template>
+          </el-table-column>
+          <el-table-column label="发放/领取/核销" width="150">
+            <template #default="{ row }">{{ row.totalCount }} / {{ row.receivedCount }} / {{ row.usedCount }}</template>
+          </el-table-column>
+          <el-table-column label="核销订单" prop="orderCount" width="100" />
+          <el-table-column label="带动 GMV" width="130">
+            <template #default="{ row }">¥{{ row.gmv.toFixed(2) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <h4 class="stats-title">秒杀效果</h4>
+        <el-table :data="activityStats?.seckills ?? []" stripe size="small">
+          <el-table-column label="ID" prop="id" width="65" />
+          <el-table-column label="活动名称" prop="name" min-width="180" />
+          <el-table-column label="商品数" prop="productCount" width="90" />
+          <el-table-column label="售出件数" prop="soldCount" width="100" />
+          <el-table-column label="秒杀 GMV" width="130">
+            <template #default="{ row }">¥{{ row.gmv.toFixed(2) }}</template>
+          </el-table-column>
+          <el-table-column label="让利金额" width="130">
+            <template #default="{ row }">¥{{ row.discountAmount.toFixed(2) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                {{ row.status === 1 ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h4 class="stats-title">满减/满赠活动</h4>
+        <el-table :data="activityStats?.promotions ?? []" stripe size="small">
+          <el-table-column label="ID" prop="id" width="65" />
+          <el-table-column label="活动名称" prop="name" min-width="180" />
+          <el-table-column label="类型" width="80">
+            <template #default="{ row }">{{ row.type === 2 ? '满赠' : '满减' }}</template>
+          </el-table-column>
+          <el-table-column label="开始时间" prop="startTime" width="170" />
+          <el-table-column label="结束时间" prop="endTime" width="170" />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+                {{ row.status === 1 ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="hint">说明：订单未记录具体促销 ID，满减/满赠以「让利总额 + 涉及订单数」汇总统计。</p>
       </el-tab-pane>
     </el-tabs>
   </el-card>
@@ -902,6 +1049,10 @@ onMounted(() => {
       </el-form-item>
       <el-form-item label="状态">
         <el-switch v-model="couponDialog.status" :active-value="1" :inactive-value="0" />
+      </el-form-item>
+      <el-form-item label="新人券">
+        <el-switch v-model="couponDialog.isNewUser" />
+        <span class="hint">开启后，新用户注册成功时自动发放该券</span>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -987,16 +1138,41 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="promotionDialog.visible" :title="promotionDialog.mode === 'create' ? '新增满减活动' : '编辑满减活动'" width="560px">
+    <el-dialog v-model="promotionDialog.visible" :title="promotionDialog.mode === 'create' ? '新增促销活动' : '编辑促销活动'" width="760px">
       <el-form label-width="90px">
-        <el-form-item label="活动名称"><el-input v-model="promotionDialog.name" placeholder="如 双十一满减" /></el-form-item>
-        <el-form-item label="满减档位">
+        <el-form-item label="活动名称"><el-input v-model="promotionDialog.name" placeholder="如 双十一满减 / 满 199 赠好礼" /></el-form-item>
+        <el-form-item label="活动类型">
+          <el-radio-group v-model="promotionDialog.type" @change="onPromotionTypeChange">
+            <el-radio-button :value="1">满减</el-radio-button>
+            <el-radio-button :value="2">满赠</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="promotionDialog.type === 2 ? '满赠档位' : '满减档位'">
           <div class="seckill-rows">
             <div v-for="(t, i) in promotionDialog.thresholds" :key="i" class="seckill-row">
               <span class="hint">满</span>
-              <el-input-number v-model="t.amount" :min="0" :precision="2" style="width: 130px" />
-              <span class="hint">减</span>
-              <el-input-number v-model="t.reduce" :min="0" :precision="2" style="width: 130px" />
+              <el-input-number v-model="t.amount" :min="0" :precision="2" style="width: 120px" />
+              <template v-if="promotionDialog.type === 2">
+                <span class="hint">赠</span>
+                <el-select
+                  v-model="t.giftProductId"
+                  placeholder="选择赠品"
+                  filterable
+                  style="width: 180px"
+                  @change="t.giftSkuId = undefined"
+                >
+                  <el-option v-for="p in productOptions" :key="p.id" :label="p.name" :value="p.id" />
+                </el-select>
+                <el-select v-model="t.giftSkuId" placeholder="规格" style="width: 140px">
+                  <el-option v-for="s in skusOf(t.giftProductId)" :key="s.id" :label="s.specText || s.skuCode" :value="s.id" />
+                </el-select>
+                <span class="hint">×</span>
+                <el-input-number v-model="t.giftQuantity" :min="1" style="width: 90px" />
+              </template>
+              <template v-else>
+                <span class="hint">减</span>
+                <el-input-number v-model="t.reduce" :min="0" :precision="2" style="width: 130px" />
+              </template>
               <el-button link type="danger" @click="promotionDialog.thresholds.splice(i, 1)">删除</el-button>
             </div>
             <el-button link type="primary" @click="addThreshold">+ 添加档位</el-button>
@@ -1068,6 +1244,37 @@ onMounted(() => {
   margin-left: 10px;
   font-size: 12px;
   color: #9aa3af;
+}
+.new-user-tag {
+  margin-left: 8px;
+}
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.stat-card {
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stat-card span {
+  font-size: 13px;
+  color: #8a93a0;
+}
+.stat-card b {
+  font-size: 22px;
+  font-weight: 500;
+  color: #fe7c00;
+}
+.stats-title {
+  margin: 18px 0 10px;
+  font-size: 14px;
 }
 .seckill-rows {
   display: flex;

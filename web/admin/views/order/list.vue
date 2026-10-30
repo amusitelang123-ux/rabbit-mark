@@ -21,6 +21,7 @@ const query = reactive({
   orderNo: '',
   status: undefined as number | undefined,
   onlyReminded: false,
+  onlyAbnormal: false,
   page: 1,
   pageSize: 10,
 })
@@ -99,6 +100,7 @@ async function load() {
       orderNo: query.orderNo || undefined,
       status: query.status,
       onlyReminded: query.onlyReminded || undefined,
+      onlyAbnormal: query.onlyAbnormal || undefined,
       startTime: dateRange.value?.[0],
       endTime: dateRange.value?.[1],
       page: query.page,
@@ -123,6 +125,7 @@ function reset() {
   query.orderNo = ''
   query.status = undefined
   query.onlyReminded = false
+  query.onlyAbnormal = false
   dateRange.value = null
   search()
 }
@@ -230,6 +233,9 @@ onMounted(async () => {
         <el-form-item label="催发货">
           <el-checkbox v-model="query.onlyReminded" @change="onRemindFilterChange">仅看催发货</el-checkbox>
         </el-form-item>
+        <el-form-item label="异常">
+          <el-checkbox v-model="query.onlyAbnormal" @change="search">仅看异常</el-checkbox>
+        </el-form-item>
         <el-form-item label="下单时间">
           <el-date-picker
             v-model="dateRange"
@@ -270,9 +276,10 @@ onMounted(async () => {
         <el-table-column label="实付" width="110">
           <template #default="{ row }">¥{{ row.payAmount }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)">{{ ORDER_STATUS_TEXT[row.status as 10] }}</el-tag>
+            <el-tag v-if="row.isAbnormal" type="danger" effect="dark" class="abnormal-tag">异常</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="催发货" width="120">
@@ -398,5 +405,8 @@ onMounted(async () => {
 .muted {
   color: #9aa3af;
   font-size: 13px;
+}
+.abnormal-tag {
+  margin-left: 4px;
 }
 </style>

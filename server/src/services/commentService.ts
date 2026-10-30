@@ -2,9 +2,10 @@ import { Op, fn, col, type WhereOptions } from 'sequelize'
 import { sequelize } from '../config/database'
 import { Order, OrderItem, Product, ProductComment, User } from '../models'
 import { AppError } from '../utils/errors'
-import { ERR, ORDER_STATUS } from '../constants'
+import { ERR, ORDER_STATUS, POINTS_RULE, POINTS_TYPE } from '../constants'
 import { formatDate } from '../utils/serializers'
 import { writeOrderLog } from '../utils/orderLog'
+import { applyPoints } from './pointsService'
 
 function toClientCommentDto(c: ProductComment & { product?: Product | null }) {
   return {
@@ -85,6 +86,7 @@ export async function createComment(userId: number, input: CreateCommentInput) {
       throw new AppError('订单完成后才能评价', ERR.ORDER_STATUS_INVALID)
     }
     if (item.isCommented) throw new AppError('该商品已评价', ERR.PARAM)
+    if (item.isGift) throw new AppError('赠品不支持评价', ERR.PARAM)
 
     const comment = await ProductComment.create(
       {
@@ -113,11 +115,23 @@ export async function createComment(userId: number, input: CreateCommentInput) {
       transaction,
     )
 
+    // 评价有礼（U-65）：发布晒单奖励积分，与评价同事务
+    await applyPoints(
+      userId,
+      POINTS_TYPE.COMMENT_REWARD,
+      POINTS_RULE.COMMENT_REWARD,
+      `评价「${item.productName}」获得积分`,
+      transaction,
+    )
+
     const full = await ProductComment.findByPk(comment.id, {
       include: [{ model: Product, as: 'product' }],
       transaction,
     })
-    return toClientCommentDto(full as unknown as ProductComment & { product?: Product | null })
+    return {
+      ...toClientCommentDto(full as unknown as ProductComment & { product?: Product | null }),
+      rewardPoints: POINTS_RULE.COMMENT_REWARD,
+    }
   })
 }
 
@@ -125,7 +139,8 @@ export async function createComment(userId: number, input: CreateCommentInput) {
 export async function myComments(userId: number) {
   const [pendingItems, comments] = await Promise.all([
     OrderItem.findAll({
-      where: { isCommented: 0 },
+      // 赠品不参与评价（U-62）
+      where: { isCommented: 0, isGift: 0 },
       include: [
         {
           model: Order,

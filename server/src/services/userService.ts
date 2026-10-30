@@ -11,12 +11,33 @@ import {
   UserFavorite,
   UserFootprint,
   UserLevel,
+  UserLoginLog,
 } from '../models'
 import { AppError } from '../utils/errors'
 import { ERR, SMS_MOCK_CODE } from '../constants'
 import { signAccessToken, signRefreshToken, verifyToken } from '../utils/jwt'
 import { maskPhone } from '../utils/helpers'
-import { toAddressDto, toProductDto, toUserDto, type ProductWithRelations } from '../utils/serializers'
+import { toAddressDto, toProductDto, toUserDto, formatDate, type ProductWithRelations } from '../utils/serializers'
+import { grantNewUserCoupons } from './couponService'
+
+export interface LoginMeta {
+  ip?: string
+  userAgent?: string
+}
+
+/** 记录登录设备（U-45）；失败不影响登录主流程 */
+async function recordLogin(userId: number, loginType: number, meta?: LoginMeta) {
+  try {
+    await UserLoginLog.create({
+      userId,
+      loginType,
+      ip: meta?.ip ? meta.ip.slice(0, 64) : null,
+      userAgent: meta?.userAgent ? meta.userAgent.slice(0, 255) : null,
+    })
+  } catch {
+    // 登录记录失败不阻断登录
+  }
+}
 
 const productInclude = [
   { model: ProductSku, as: 'skus' },
@@ -31,8 +52,19 @@ async function loadUser(id: number) {
   return user
 }
 
-export async function register(input: { username?: string; phone?: string; password: string }) {
+export async function register(
+  input: {
+    username?: string
+    phone?: string
+    password: string
+    code?: string
+  },
+  meta?: LoginMeta,
+) {
   if (input.phone) {
+    if (input.code !== SMS_MOCK_CODE) {
+      throw new AppError('验证码不正确', ERR.SMS_CODE_INVALID)
+    }
     const exists = await User.findOne({ where: { phone: input.phone } })
     if (exists) throw new AppError('该手机号已注册', ERR.USER_EXISTS)
   }
@@ -49,10 +81,16 @@ export async function register(input: { username?: string; phone?: string; passw
     avatar: '',
     points: 0,
   })
-  return issueTokens(user)
+  // 新人券包（U-63）：注册即发；发券失败不回滚注册
+  const newUserCoupons = await grantNewUserCoupons(Number(user.id)).catch(() => 0)
+  await recordLogin(Number(user.id), 3, meta)
+  return { ...(await issueTokens(user)), newUserCoupons }
 }
 
-export async function login(input: { account?: string; phone?: string; password: string }) {
+export async function login(
+  input: { account?: string; phone?: string; password: string },
+  meta?: LoginMeta,
+) {
   const key = input.phone || input.account || ''
   const user = await User.findOne({
     where: { [Op.or]: [{ username: key }, { phone: key }] },
@@ -63,6 +101,21 @@ export async function login(input: { account?: string; phone?: string; password:
   if (!matched) throw new AppError('账号或密码错误', ERR.LOGIN_FAILED)
   user.lastLoginAt = new Date()
   await user.save()
+  await recordLogin(Number(user.id), 1, meta)
+  return issueTokens(user)
+}
+
+/** 手机验证码登录：演示环境验证码固定为 SMS_MOCK_CODE，与找回密码共用 */
+export async function loginBySms(input: { phone: string; code: string }, meta?: LoginMeta) {
+  if (input.code !== SMS_MOCK_CODE) {
+    throw new AppError('验证码不正确', ERR.SMS_CODE_INVALID)
+  }
+  const user = await User.findOne({ where: { phone: input.phone } })
+  if (!user) throw new AppError('该手机号尚未注册', ERR.LOGIN_FAILED)
+  if (user.status !== 1) throw new AppError('账号已被禁用', ERR.USER_DISABLED)
+  user.lastLoginAt = new Date()
+  await user.save()
+  await recordLogin(Number(user.id), 2, meta)
   return issueTokens(user)
 }
 
@@ -122,6 +175,42 @@ export async function changePassword(
   user.password = await bcrypt.hash(input.newPassword, 10)
   await user.save()
   return { changed: true }
+}
+
+/** 登录设备记录（U-45）：最近 20 条 */
+export async function listLoginLogs(userId: number) {
+  const rows = await UserLoginLog.findAll({
+    where: { userId },
+    order: [['id', 'DESC']],
+    limit: 20,
+  })
+  return rows.map((row) => ({
+    id: Number(row.id),
+    loginType: row.loginType,
+    ip: row.ip ?? '',
+    userAgent: row.userAgent ?? '',
+    loginAt: formatDate(row.loginAt),
+  }))
+}
+
+/** 设置/修改支付密码（U-45，预留）：6 位数字，已设置时需校验原支付密码 */
+export async function setPayPassword(
+  userId: number,
+  input: { password: string; oldPassword?: string },
+) {
+  if (!/^\d{6}$/.test(input.password)) {
+    throw new AppError('支付密码必须为 6 位数字', ERR.PARAM)
+  }
+  const user = await User.findByPk(userId)
+  if (!user) throw AppError.notFound('用户不存在')
+  if (user.payPassword) {
+    if (!input.oldPassword) throw new AppError('请输入原支付密码', ERR.PARAM)
+    const matched = await bcrypt.compare(input.oldPassword, user.payPassword)
+    if (!matched) throw new AppError('原支付密码错误', ERR.PARAM)
+  }
+  user.payPassword = await bcrypt.hash(input.password, 10)
+  await user.save()
+  return { hasPayPassword: true }
 }
 
 /** 找回密码：手机号 + 短信验证码重置（演示环境验证码固定为 SMS_MOCK_CODE） */

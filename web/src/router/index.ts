@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { readStored } from '@/utils/authStorage'
 
 /** 用户端路由（后台管理端是独立应用，见 web/admin/router.ts） */
 const router = createRouter({
@@ -13,11 +14,13 @@ const router = createRouter({
         { path: 'category/:id?', name: 'category', component: () => import('@/views/client/category/index.vue'), meta: { title: '商品分类' } },
         { path: 'products', name: 'products', component: () => import('@/views/client/product/list.vue'), meta: { title: '商品列表' } },
         { path: 'search', name: 'search', component: () => import('@/views/client/search/index.vue'), meta: { title: '搜索' } },
+        { path: 'brands', name: 'brands', component: () => import('@/views/client/brand/index.vue'), meta: { title: '品牌专区' } },
         { path: 'product/:id', name: 'product-detail', component: () => import('@/views/client/product/detail.vue'), meta: { title: '商品详情' } },
         { path: 'cart', name: 'cart', component: () => import('@/views/client/cart/index.vue'), meta: { title: '购物车' } },
         { path: 'checkout', name: 'checkout', component: () => import('@/views/client/order/confirm.vue'), meta: { title: '确认订单', auth: true } },
         { path: 'orders', name: 'orders', component: () => import('@/views/client/order/list.vue'), meta: { title: '我的订单', auth: true } },
         { path: 'order/:orderNo', name: 'order-detail', component: () => import('@/views/client/order/detail.vue'), meta: { title: '订单详情', auth: true } },
+        { path: 'pay/result', name: 'pay-result', component: () => import('@/views/client/pay/result.vue'), meta: { title: '支付结果', auth: true } },
         { path: 'coupons', name: 'coupons', component: () => import('@/views/client/marketing/coupons.vue'), meta: { title: '领券中心' } },
         { path: 'seckill', name: 'seckill', component: () => import('@/views/client/seckill/index.vue'), meta: { title: '限时秒杀' } },
         { path: 'help', name: 'help', component: () => import('@/views/client/help/index.vue'), meta: { title: '帮助中心' } },
@@ -35,7 +38,7 @@ const router = createRouter({
 
 /** 用户端守卫：需要登录的页面（meta.auth）未登录时跳转登录页 */
 router.beforeEach((to) => {
-  const token = localStorage.getItem('xtx_access_token')
+  const token = readStored('xtx_access_token')
   if (to.meta.auth && !token) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }

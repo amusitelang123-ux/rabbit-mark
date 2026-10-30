@@ -18,6 +18,7 @@ import * as content from '../../controllers/admin/contentController'
 import * as inventory from '../../controllers/admin/inventoryController'
 import * as setting from '../../controllers/admin/settingController'
 import * as feedback from '../../controllers/admin/feedbackController'
+import * as homeFloor from '../../controllers/admin/homeFloorController'
 
 const router = Router()
 
@@ -71,12 +72,15 @@ router.get('/orders/export', requirePermission('order:view'), order.exportCsv)
 router.post('/orders/batch/ship', requirePermission('order:ship'), order.batchShip)
 router.get('/orders/:orderNo', requirePermission('order:view'), order.detail)
 router.post('/orders/:orderNo/ship', requirePermission('order:ship'), order.ship)
+router.put('/orders/:orderNo/logistics', requirePermission('order:ship'), order.updateShipping)
+router.put('/orders/:orderNo/abnormal', requirePermission('order:update'), order.abnormal)
 router.put('/orders/:orderNo/close', requirePermission('order:update'), order.close)
 router.put('/orders/:orderNo/remark', requirePermission('order:update'), order.remark)
 
 /* 售后 */
 router.get('/refunds', requirePermission('refund:view'), refund.list)
 router.put('/refunds/:id/audit', requirePermission('refund:audit'), refund.audit)
+router.put('/refunds/:id/receive', requirePermission('refund:audit'), refund.receive)
 
 /* 用户 */
 router.get('/users', requirePermission('user:view'), user.list)
@@ -84,6 +88,14 @@ router.get('/users/:id', requirePermission('user:view'), user.detail)
 router.put('/users/:id/status', requirePermission('user:update'), user.setStatus)
 router.get('/users/:id/points', requirePermission('user:view'), user.points)
 router.post('/users/:id/points', requirePermission('points:adjust'), user.adjustPoints)
+router.put('/users/:id/tags', requirePermission('user:update'), user.setTags)
+router.put('/users/:id/balance', requirePermission('user:update'), user.adjustBalance)
+
+/* 用户标签（A-35） */
+router.get('/user-tags', requirePermission('user:view'), user.tags)
+router.post('/user-tags', requirePermission('user:update'), user.createTag)
+router.put('/user-tags/:id', requirePermission('user:update'), user.updateTag)
+router.delete('/user-tags/:id', requirePermission('user:update'), user.removeTag)
 
 /* 会员等级 */
 router.get('/levels', requirePermission('level:view'), level.list)
@@ -109,6 +121,12 @@ router.get('/notices', requirePermission('marketing:view'), marketing.notices)
 router.post('/notices', requirePermission('marketing:create'), marketing.createNotice)
 router.put('/notices/:id', requirePermission('marketing:update'), marketing.updateNotice)
 router.delete('/notices/:id', requirePermission('marketing:delete'), marketing.removeNotice)
+
+/* 首页推荐楼层（A-44） */
+router.get('/home-floors', requirePermission('marketing:view'), homeFloor.list)
+router.post('/home-floors', requirePermission('marketing:create'), homeFloor.create)
+router.put('/home-floors/:id', requirePermission('marketing:update'), homeFloor.update)
+router.delete('/home-floors/:id', requirePermission('marketing:delete'), homeFloor.remove)
 
 /* 秒杀 */
 router.get('/seckills', requirePermission('marketing:view'), marketing.seckills)
@@ -141,13 +159,18 @@ router.delete('/freight-templates/:id', requirePermission('logistics:update'), c
 
 /* 数据统计 */
 router.get('/stats/sales-trend', requirePermission('stats:view'), stats.salesTrend)
+router.get('/stats/daily', requirePermission('stats:view'), stats.daily)
 router.get('/stats/product-rank', requirePermission('stats:view'), stats.productRank)
 router.get('/stats/category-sales', requirePermission('stats:view'), stats.categorySales)
 router.get('/stats/user-analysis', requirePermission('stats:view'), stats.userAnalysis)
+router.get('/stats/order-status', requirePermission('stats:view'), stats.orderStatus)
+router.get('/stats/marketing', requirePermission('marketing:view'), stats.marketing)
+router.get('/stats/export', requirePermission('stats:view'), stats.exportStats)
 
 /* 财务 */
 router.get('/finance/records', requirePermission('finance:view'), finance.records)
 router.get('/finance/reconciliation', requirePermission('finance:view'), finance.reconciliation)
+router.get('/finance/report', requirePermission('finance:view'), finance.report)
 router.get('/finance/invoices', requirePermission('finance:view'), finance.invoices)
 router.put('/finance/invoices/:id', requirePermission('finance:view'), finance.setInvoiceStatus)
 

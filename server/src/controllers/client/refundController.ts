@@ -2,6 +2,8 @@ import type { Request, Response } from 'express'
 import { z } from 'zod'
 import { asyncHandler } from '../../middlewares/asyncHandler'
 import { sendOk } from '../../utils/response'
+import { toUploadUrl } from '../../middlewares/upload'
+import { AppError } from '../../utils/errors'
 import * as refundService from '../../services/refundService'
 
 const applySchema = z.object({
@@ -20,4 +22,10 @@ export const apply = asyncHandler(async (req: Request, res: Response) => {
 
 export const mine = asyncHandler(async (req: Request, res: Response) => {
   sendOk(res, await refundService.listMyRefunds(req.auth!.uid))
+})
+
+/** 售后凭证上传（U-72） */
+export const uploadImage = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.file) throw new AppError('请选择要上传的图片')
+  sendOk(res, { url: toUploadUrl('refunds', req.file.filename) }, '上传成功')
 })

@@ -185,6 +185,9 @@ function logout() {
               <div v-if="showAccount" class="hdr__menu">
                 <template v-if="user.isLoggedIn">
                   <router-link to="/user" class="hdr__menu-link">个人中心</router-link>
+                  <router-link :to="{ path: '/user', query: { tab: 'wallet' } }" class="hdr__menu-link">
+                    我的钱包
+                  </router-link>
                   <router-link to="/orders" class="hdr__menu-link">我的订单</router-link>
                   <router-link to="/coupons" class="hdr__menu-link">我的优惠券</router-link>
                   <button class="hdr__menu-link hdr__menu-link--btn" type="button" @click="logout">退出登录</button>
@@ -257,6 +260,7 @@ function logout() {
 
         <router-link to="/seckill" class="hdr__sub-link">限时秒杀</router-link>
         <router-link to="/coupons" class="hdr__sub-link">领券中心</router-link>
+        <router-link to="/brands" class="hdr__sub-link">品牌专区</router-link>
         <router-link to="/notices" class="hdr__sub-link">平台公告</router-link>
         <router-link to="/help" class="hdr__sub-link">帮助中心</router-link>
 

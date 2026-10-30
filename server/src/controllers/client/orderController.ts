@@ -11,6 +11,19 @@ const createSchema = z.object({
   couponId: z.number().int().min(0).optional(),
   remark: z.string().max(255).optional(),
   source: z.number().int().optional(),
+  // 积分抵现（U-64）：由服务端按积分余额与 50% 上限计算实际抵扣
+  usePoints: z.boolean().optional(),
+  // 发票：1 电子普票 / 2 增值税专票；不传表示不开票
+  invoice: z
+    .object({
+      type: z.union([z.literal(1), z.literal(2)]),
+      title: z.string().trim().min(1, '请填写发票抬头').max(100),
+      taxNo: z.string().trim().max(50).optional(),
+      email: z.union([z.string().trim().email('邮箱格式不正确'), z.literal('')]).optional(),
+      content: z.string().trim().max(255).optional(),
+    })
+    .refine((v) => v.type !== 2 || Boolean(v.taxNo), { message: '专票必须填写税号', path: ['taxNo'] })
+    .optional(),
 })
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
@@ -20,7 +33,15 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const status = req.query.status ? toInt(req.query.status, 0) : undefined
-  sendOk(res, await orderService.listOrders(req.auth!.uid, status))
+  sendOk(
+    res,
+    await orderService.listOrders(
+      req.auth!.uid,
+      status,
+      toInt(req.query.page, 1),
+      toInt(req.query.pageSize, 10),
+    ),
+  )
 })
 
 export const detail = asyncHandler(async (req: Request, res: Response) => {

@@ -23,6 +23,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
       userId: req.query.userId ? toInt(req.query.userId, 0) : undefined,
       status: req.query.status ? toInt(req.query.status, 0) : undefined,
       onlyReminded: req.query.onlyReminded === 'true' || req.query.onlyReminded === '1',
+      onlyAbnormal: req.query.onlyAbnormal === 'true' || req.query.onlyAbnormal === '1',
       startTime: req.query.startTime ? String(req.query.startTime) : undefined,
       endTime: req.query.endTime ? String(req.query.endTime) : undefined,
       page: toInt(req.query.page, 1),
@@ -47,6 +48,30 @@ export const ship = asyncHandler(async (req: Request, res: Response) => {
 export const close = asyncHandler(async (req: Request, res: Response) => {
   const { reason } = closeSchema.parse(req.body)
   sendOk(res, await orderService.closeOrder(req.params.orderNo, reason, `admin:${req.auth!.uid}`), '订单已关闭')
+})
+
+/** 修改运单号（A-22）：已发货/已完成订单可改 */
+export const updateShipping = asyncHandler(async (req: Request, res: Response) => {
+  const input = z
+    .object({ company: z.string().min(1).max(50), trackingNo: z.string().min(1).max(64) })
+    .parse(req.body)
+  sendOk(
+    res,
+    await orderService.updateShipping(req.params.orderNo, input, `admin:${req.auth!.uid}`),
+    '运单号已更新',
+  )
+})
+
+/** 异常标记（A-23） */
+export const abnormal = asyncHandler(async (req: Request, res: Response) => {
+  const input = z
+    .object({ abnormal: z.boolean(), reason: z.string().max(255).optional() })
+    .parse(req.body)
+  sendOk(
+    res,
+    await orderService.markAbnormal(req.params.orderNo, input, `admin:${req.auth!.uid}`),
+    input.abnormal ? '已标记异常' : '已取消异常标记',
+  )
 })
 
 /** 批量发货：请求体传 [{ orderNo, company, trackingNo }] */

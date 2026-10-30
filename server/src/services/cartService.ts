@@ -41,6 +41,11 @@ export async function addToCart(
       selected: 1,
     })
   }
+  // 加购榜（A-52）：累计加购件数，失败不影响加购主流程
+  await Product.increment('cartAddCount', {
+    by: quantity,
+    where: { id: input.productId },
+  }).catch(() => undefined)
   return getCart(userId)
 }
 

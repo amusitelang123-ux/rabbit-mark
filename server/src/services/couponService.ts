@@ -348,8 +348,25 @@ export async function receiveCoupon(userId: number, couponId: number) {
   })
 }
 
-/** 我的优惠券：先把已过期未使用券落库为状态 2，再返回三态列表 */
-export async function myCoupons(userId: number) {
+/**
+ * 新人券包（U-63）：注册成功后自动发放启用中的新人券。
+ * 单张券已领完或配置异常时跳过，不影响注册主流程。
+ */
+export async function grantNewUserCoupons(userId: number): Promise<number> {
+  const coupons = await Coupon.findAll({ where: { status: 1, isNewUser: 1 } })
+  let granted = 0
+  for (const coupon of coupons) {
+    try {
+      await receiveCoupon(userId, Number(coupon.id))
+      granted += 1
+    } catch {
+      // 忽略单张券的发放失败（已领完/有效期未开始等）
+    }
+  }
+  return granted
+}
+
+/** 我的优惠券：先把已过期未使用券落库为状态 2，再返回三态列表 */export async function myCoupons(userId: number) {
   const now = new Date()
   await UserCoupon.update(
     { status: 2 },

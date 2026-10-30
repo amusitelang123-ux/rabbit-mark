@@ -1,27 +1,41 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { addressApi, commentApi, couponApi, pointsApi, refundApi, userApi } from '@/api'
-import type { Address, Coupon, MyComments, MyPoints, PendingComment, Product, Refund } from '@/api/types'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { addressApi, commentApi, couponApi, pointsApi, refundApi, userApi, walletApi } from '@/api'
+import type { Address, Coupon, LoginLogItem, MyComments, MyPoints, MyWallet, PendingComment, Product, Refund } from '@/api/types'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
 import { useAddressStore } from '@/stores/address'
 import ProductCard from '@/components/ProductCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import AddressFormModal from '@/components/AddressFormModal.vue'
+import BalanceRechargeDialog from '@/components/BalanceRechargeDialog.vue'
 import CommentDialog from '@/views/client/order/components/CommentDialog.vue'
 import { formatMoney } from '@/utils/money'
 
 const user = useUserStore()
 const ui = useUiStore()
 const addressStore = useAddressStore()
+const route = useRoute()
+const router = useRouter()
 
-type Tab = 'profile' | 'address' | 'coupon' | 'favorite' | 'footprint' | 'refund' | 'comment' | 'security' | 'points'
-const active = ref<Tab>('profile')
+type Tab =
+  | 'profile'
+  | 'address'
+  | 'coupon'
+  | 'wallet'
+  | 'favorite'
+  | 'footprint'
+  | 'refund'
+  | 'comment'
+  | 'security'
+  | 'points'
 
 const menus: { key: Tab; label: string; icon: string }[] = [
   { key: 'profile', label: '个人资料', icon: '👤' },
   { key: 'address', label: '收货地址', icon: '📍' },
   { key: 'coupon', label: '我的优惠券', icon: '🎟️' },
+  { key: 'wallet', label: '我的钱包', icon: '💰' },
   { key: 'points', label: '我的积分', icon: '⭐' },
   { key: 'favorite', label: '我的收藏', icon: '♥' },
   { key: 'footprint', label: '浏览足迹', icon: '🕓' },
@@ -30,8 +44,29 @@ const menus: { key: Tab; label: string; icon: string }[] = [
   { key: 'security', label: '账户安全', icon: '🔒' },
 ]
 
+function tabFromQuery(): Tab | null {
+  const value = String(route.query.tab ?? '')
+  return menus.some((m) => m.key === value) ? (value as Tab) : null
+}
+
+const active = ref<Tab>(tabFromQuery() ?? 'profile')
+watch(
+  () => route.query.tab,
+  () => {
+    active.value = tabFromQuery() ?? 'profile'
+  },
+)
+
+/** 切换页签时同步地址栏，保证从顶栏再次进入同一页签也能生效 */
+function selectTab(key: Tab) {
+  active.value = key
+  if (route.query.tab) {
+    router.replace({ path: '/user', query: { ...route.query, tab: key } })
+  }
+}
+
 const REFUND_TYPE_TEXT: Record<number, string> = { 1: '仅退款', 2: '退货退款', 3: '换货' }
-const REFUND_STATUS_TEXT: Record<number, string> = { 0: '待审核', 1: '已同意', 2: '已拒绝', 3: '已退款' }
+const REFUND_STATUS_TEXT: Record<number, string> = { 0: '待审核', 1: '已同意', 2: '已拒绝', 3: '已退款', 4: '待退货', 5: '已换货' }
 
 const addresses = computed(() => addressStore.list)
 const showAddressModal = ref(false)
@@ -47,7 +82,39 @@ const myComments = ref<MyComments>({ pending: [], done: [] })
 const myPoints = ref<MyPoints>({ balance: 0, todaySigned: false, logs: [] })
 const signingIn = ref(false)
 
-const POINTS_TYPE_TEXT: Record<number, string> = { 1: '签到', 2: '消费获得', 3: '积分抵扣', 4: '后台调整' }
+const POINTS_TYPE_TEXT: Record<number, string> = { 1: '签到', 2: '消费获得', 3: '积分抵扣', 4: '后台调整', 5: '评价奖励' }
+
+/* 钱包与余额充值（U-30） */
+const wallet = ref<MyWallet>({ balance: 0, totalRecharged: 0, logs: [], recharges: [] })
+const rechargeVisible = ref(false)
+const BALANCE_LOG_TYPE_TEXT: Record<number, string> = {
+  1: '账户充值',
+  2: '余额支付',
+  3: '售后退款',
+  4: '后台调整',
+}
+const RECHARGE_STATUS_TEXT: Record<number, string> = {
+  0: '待支付',
+  1: '已到账',
+  2: '支付失败',
+  4: '已关闭',
+}
+
+async function loadWallet() {
+  wallet.value = await walletApi.mine()
+}
+
+function openRecharge() {
+  rechargeVisible.value = true
+}
+
+async function onRecharged(balance: number) {
+  wallet.value.balance = balance
+  await Promise.all([
+    loadWallet().catch(() => undefined),
+    user.loadProfile().catch(() => undefined),
+  ])
+}
 
 async function signIn() {
   if (signingIn.value || myPoints.value.todaySigned) return
@@ -74,6 +141,49 @@ function openComment(item: PendingComment) {
 
 async function onCommentSubmitted() {
   myComments.value = await commentApi.mine()
+}
+
+/* 账户安全：登录设备 + 支付密码 */
+const loginLogs = ref<LoginLogItem[]>([])
+const LOGIN_TYPE_TEXT: Record<number, string> = { 1: '密码登录', 2: '短信登录', 3: '注册登录' }
+const hasPayPassword = computed(() => Boolean(user.user?.hasPayPassword))
+const payPwdForm = ref({ password: '', oldPassword: '', confirm: '' })
+const payPwdSubmitting = ref(false)
+
+function uaShort(ua: string): string {
+  if (!ua) return '未知设备'
+  return ua.length > 64 ? `${ua.slice(0, 64)}…` : ua
+}
+
+async function submitPayPassword() {
+  const form = payPwdForm.value
+  if (!/^\d{6}$/.test(form.password)) {
+    ui.toast('支付密码必须为 6 位数字', 'error')
+    return
+  }
+  if (form.password !== form.confirm) {
+    ui.toast('两次输入的支付密码不一致', 'error')
+    return
+  }
+  if (hasPayPassword.value && !form.oldPassword) {
+    ui.toast('请输入原支付密码', 'error')
+    return
+  }
+  payPwdSubmitting.value = true
+  const wasSet = hasPayPassword.value
+  try {
+    await userApi.setPayPassword({
+      password: form.password,
+      oldPassword: form.oldPassword || undefined,
+    })
+    await user.loadProfile()
+    payPwdForm.value = { password: '', oldPassword: '', confirm: '' }
+    ui.toast(wasSet ? '支付密码已更新' : '支付密码已设置')
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '保存失败', 'error')
+  } finally {
+    payPwdSubmitting.value = false
+  }
 }
 
 /* 修改密码 */
@@ -133,7 +243,7 @@ const uploadingAvatar = ref(false)
 const AVATAR_MAX_SIZE = 2 * 1024 * 1024
 
 onMounted(async () => {
-  const [, c, fav, fp, rf, cm, pt] = await Promise.all([
+  const [, c, fav, fp, rf, cm, pt, w, logs] = await Promise.all([
     addressStore.load(),
     couponApi.mine(),
     userApi.favorites(),
@@ -141,6 +251,13 @@ onMounted(async () => {
     refundApi.mine(),
     commentApi.mine(),
     pointsApi.mine(),
+    walletApi.mine().catch((): MyWallet => ({
+      balance: user.user?.balance ?? 0,
+      totalRecharged: 0,
+      logs: [],
+      recharges: [],
+    })),
+    userApi.loginLogs().catch(() => [] as LoginLogItem[]),
   ])
   coupons.value = c
   favorites.value = fav
@@ -148,6 +265,8 @@ onMounted(async () => {
   refunds.value = rf
   myComments.value = cm
   myPoints.value = pt
+  wallet.value = w
+  loginLogs.value = logs
   try {
     await user.loadProfile()
     syncForm()
@@ -250,8 +369,10 @@ function couponLabel(c: Coupon): string {
             <span class="uc__level">{{ user.user?.levelName }}</span>
             <div class="uc__stats">
               <div><b>{{ user.user?.points }}</b><span>积分</span></div>
+              <div><b>¥{{ formatMoney(user.user?.balance ?? 0) }}</b><span>余额</span></div>
               <div><b>¥{{ formatMoney(user.user?.totalSpent ?? 0) }}</b><span>累计消费</span></div>
             </div>
+            <button class="uc__recharge-btn" type="button" @click="openRecharge">余额充值</button>
           </div>
 
           <nav class="uc__menu card">
@@ -259,7 +380,7 @@ function couponLabel(c: Coupon): string {
               v-for="m in menus"
               :key="m.key"
               :class="{ 'is-active': active === m.key }"
-              @click="active = m.key"
+              @click="selectTab(m.key)"
             >
               <span class="uc__menu-icon">{{ m.icon }}</span>
               {{ m.label }}
@@ -363,6 +484,70 @@ function couponLabel(c: Coupon): string {
               </div>
               <EmptyState v-if="!shownCoupons.length" icon="🎟️" title="暂无优惠券" />
             </div>
+          </template>
+
+          <!-- Wallet / Balance recharge -->
+          <template v-else-if="active === 'wallet'">
+            <div class="uc__head">
+              <h1 class="uc__title">我的钱包</h1>
+              <button class="btn btn-primary" @click="openRecharge">＋ 充值</button>
+            </div>
+
+            <div class="wallet-hero">
+              <div>
+                <p class="wallet-hero__label">账户余额（元）</p>
+                <b class="wallet-hero__value">¥{{ formatMoney(wallet.balance) }}</b>
+                <p class="wallet-hero__tip">余额可直接用于订单支付，余额支付的退款原路退回余额</p>
+              </div>
+              <div class="wallet-hero__side">
+                <p class="muted">累计充值</p>
+                <b>¥{{ formatMoney(wallet.totalRecharged) }}</b>
+              </div>
+            </div>
+
+            <p class="muted uc__footprint-date">资金明细</p>
+            <ul v-if="wallet.logs.length" class="wallet-list">
+              <li v-for="l in wallet.logs" :key="l.id" class="wallet-item">
+                <div class="wallet-item__main">
+                  <p>{{ BALANCE_LOG_TYPE_TEXT[l.type] ?? '余额变动' }}</p>
+                  <p class="muted">
+                    {{ l.remark }}{{ l.relatedNo ? ` · ${l.relatedNo}` : '' }} · {{ l.createdAt }}
+                  </p>
+                </div>
+                <div class="wallet-item__right">
+                  <b :class="l.change > 0 ? 'wallet-plus' : 'wallet-minus'">
+                    {{ l.change > 0 ? '+' : '-' }}¥{{ formatMoney(Math.abs(l.change)) }}
+                  </b>
+                  <span class="muted">余额 ¥{{ formatMoney(l.balance) }}</span>
+                </div>
+              </li>
+            </ul>
+            <EmptyState
+              v-else
+              icon="💰"
+              title="暂无资金记录"
+              desc="点击右上角「充值」即可为账户充值，充值后可用于余额支付"
+            >
+              <button class="btn btn-primary" @click="openRecharge">立即充值</button>
+            </EmptyState>
+
+            <template v-if="wallet.recharges.length">
+              <p class="muted uc__footprint-date">充值记录</p>
+              <ul class="wallet-list">
+                <li v-for="r in wallet.recharges" :key="r.payNo" class="wallet-item">
+                  <div class="wallet-item__main">
+                    <p>充值单 {{ r.payNo }}</p>
+                    <p class="muted">{{ r.paidAt || r.createdAt }}</p>
+                  </div>
+                  <div class="wallet-item__right">
+                    <b>¥{{ formatMoney(r.amount) }}</b>
+                    <span class="wallet-status" :class="`is-${r.status}`">
+                      {{ RECHARGE_STATUS_TEXT[r.status] ?? '处理中' }}
+                    </span>
+                  </div>
+                </li>
+              </ul>
+            </template>
           </template>
 
           <!-- Points -->
@@ -491,6 +676,62 @@ function couponLabel(c: Coupon): string {
                 {{ pwdSubmitting ? '提交中…' : '确认修改' }}
               </button>
             </div>
+
+            <div class="sec-card">
+              <h3>支付密码</h3>
+              <p class="muted">
+                {{ hasPayPassword ? '已设置支付密码，可在此修改' : '尚未设置，可选择设置 6 位数字支付密码' }}
+              </p>
+              <div v-if="hasPayPassword" class="sec-field">
+                <label>原支付密码</label>
+                <input
+                  v-model="payPwdForm.oldPassword"
+                  type="password"
+                  maxlength="6"
+                  inputmode="numeric"
+                  placeholder="请输入原 6 位支付密码"
+                />
+              </div>
+              <div class="sec-field">
+                <label>{{ hasPayPassword ? '新支付密码' : '支付密码' }}</label>
+                <input
+                  v-model="payPwdForm.password"
+                  type="password"
+                  maxlength="6"
+                  inputmode="numeric"
+                  placeholder="6 位数字"
+                />
+              </div>
+              <div class="sec-field">
+                <label>确认支付密码</label>
+                <input
+                  v-model="payPwdForm.confirm"
+                  type="password"
+                  maxlength="6"
+                  inputmode="numeric"
+                  placeholder="再次输入"
+                />
+              </div>
+              <button class="btn btn-primary" :disabled="payPwdSubmitting" @click="submitPayPassword">
+                {{ payPwdSubmitting ? '保存中…' : hasPayPassword ? '修改支付密码' : '设置支付密码' }}
+              </button>
+            </div>
+
+            <div class="sec-card">
+              <h3>登录设备</h3>
+              <p class="muted">最近 20 次登录记录，如发现陌生设备请及时修改密码</p>
+              <ul v-if="loginLogs.length" class="login-list">
+                <li v-for="item in loginLogs" :key="item.id" class="login-item">
+                  <div class="login-item__head">
+                    <b>{{ LOGIN_TYPE_TEXT[item.loginType] ?? '登录' }}</b>
+                    <span class="muted">{{ item.ip || '未知 IP' }}</span>
+                  </div>
+                  <p class="login-item__ua muted">{{ uaShort(item.userAgent) }}</p>
+                  <span class="login-item__time muted">{{ item.loginAt }}</span>
+                </li>
+              </ul>
+              <EmptyState v-else icon="💻" title="暂无登录记录" />
+            </div>
           </template>
 
           <!-- Footprint -->
@@ -520,6 +761,12 @@ function couponLabel(c: Coupon): string {
       :product-image="commentTarget?.productImage ?? ''"
       :order-no="commentTarget?.orderNo ?? ''"
       @submitted="onCommentSubmitted"
+    />
+
+    <BalanceRechargeDialog
+      v-model="rechargeVisible"
+      :balance="wallet.balance"
+      @recharged="onRecharged"
     />
   </div>
 </template>
@@ -583,6 +830,21 @@ function couponLabel(c: Coupon): string {
 .uc__stats span {
   font-size: 12px;
   color: var(--text-secondary);
+}
+.uc__recharge-btn {
+  width: 100%;
+  margin-top: 14px;
+  border: 1px solid var(--amz-button-border);
+  background: var(--amz-button);
+  border-radius: 100px;
+  padding: 7px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amz-navy);
+  transition: background 0.15s;
+}
+.uc__recharge-btn:hover {
+  background: var(--amz-button-hover);
 }
 .uc__menu {
   padding: 8px;
@@ -887,6 +1149,7 @@ function couponLabel(c: Coupon): string {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 20px;
+  margin-bottom: 16px;
 }
 .sec-card h3 {
   font-size: 16px;
@@ -914,6 +1177,31 @@ function couponLabel(c: Coupon): string {
 }
 .sec-card > .btn {
   margin-top: 20px;
+}
+.login-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.login-item {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.login-item__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.login-item__ua {
+  margin: 4px 0;
+  font-size: 12px;
+  word-break: break-all;
+}
+.login-item__time {
+  font-size: 12px;
 }
 
 .pts-hero {
@@ -975,5 +1263,110 @@ function couponLabel(c: Coupon): string {
 }
 .pts-minus {
   color: #c0392b;
+}
+
+.wallet-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: linear-gradient(120deg, #eef5ff, #e3efff);
+  border-radius: 12px;
+  padding: 24px 26px;
+  margin-bottom: 22px;
+}
+.wallet-hero__label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.wallet-hero__value {
+  font-size: 34px;
+  font-weight: 900;
+  color: var(--amz-price);
+  line-height: 1.1;
+}
+.wallet-hero__tip {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+.wallet-hero__side {
+  text-align: right;
+  border-left: 1px solid rgba(45, 58, 77, 0.12);
+  padding-left: 26px;
+}
+.wallet-hero__side p {
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+.wallet-hero__side b {
+  font-size: 22px;
+  color: var(--amz-navy-2);
+}
+.wallet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.wallet-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.wallet-item__main {
+  min-width: 0;
+}
+.wallet-item__main p:first-child {
+  font-size: 14px;
+  margin-bottom: 3px;
+}
+.wallet-item__main .muted {
+  font-size: 12.5px;
+  word-break: break-all;
+}
+.wallet-item__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.wallet-item__right b {
+  font-size: 16px;
+}
+.wallet-plus {
+  color: var(--amz-success);
+}
+.wallet-minus {
+  color: #c0392b;
+}
+.wallet-status {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.wallet-status.is-1 {
+  color: var(--amz-success);
+}
+.wallet-status.is-2 {
+  color: #c0392b;
+}
+.wallet-status.is-0 {
+  color: var(--amz-price);
+}
+
+@media (max-width: 640px) {
+  .wallet-hero__side {
+    border-left: none;
+    padding-left: 0;
+    text-align: left;
+  }
 }
 </style>

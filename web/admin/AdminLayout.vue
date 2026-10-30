@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { adminMenu } from './router'
+import { adminMenu, clearAdminRoutes } from './router'
 import { useAdminStore } from '@admin/stores/admin'
 import { resolveAdminIcon } from '@admin/utils/adminIcons'
 
@@ -20,6 +20,7 @@ async function onCommand(command: string) {
   if (command !== 'logout') return
   try {
     await ElMessageBox.confirm('确定退出登录吗？', '提示', { type: 'warning' })
+    clearAdminRoutes()
     admin.logout()
     router.replace('/admin/login')
   } catch {

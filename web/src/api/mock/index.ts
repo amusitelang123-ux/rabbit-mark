@@ -1,4 +1,4 @@
-import type { Address, CartItem, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, RebuyResult, Refund, RebuySkippedItem, RemindShipResult } from '../types'
+import type { Address, CartItem, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, LoginLogItem, MyComment, MyComments, MyPoints, MyWallet, RechargePayload, RechargeStatusResult, BalanceLog, BalanceRecharge, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, RebuyResult, Refund, RebuySkippedItem, RemindShipResult } from '../types'
 import type {
   AddressPayload,
   ApplyRefundPayload,
@@ -62,15 +62,37 @@ function paginate<T>(list: T[], page: number, pageSize: number): PageResult<T> {
 let addresses: Address[] = [...mockAddresses]
 let orders: Order[] = [...mockOrders]
 let cart: { id: number; productId: number; skuId: number; quantity: number; selected: boolean }[] = []
-const payRecords = new Map<string, string>()
+const payRecords = new Map<string, { orderNo: string; channel: number }>()
+const rechargePrepay = new Map<string, { amount: number; channel: number }>()
 const remindRecords = new Map<string, number>()
 let refunds: Refund[] = []
+let walletBalance = demoUser.balance ?? 0
+let balanceLogs: BalanceLog[] = []
+let rechargeRecords: BalanceRecharge[] = []
 
 /** 与后端 formatDate 保持一致的展示格式 */
 function formatMockTime(value: number | Date): string {
   const d = value instanceof Date ? value : new Date(value)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/** 与后端 applyBalance 对齐：同步余额并追加一条资金流水 */
+function appendBalanceLog(type: number, change: number, relatedNo: string, remark: string) {
+  walletBalance = Math.round((walletBalance + change) * 100) / 100
+  demoUser.balance = walletBalance
+  balanceLogs = [
+    {
+      id: Date.now(),
+      type,
+      change,
+      balance: walletBalance,
+      relatedNo,
+      remark,
+      createdAt: formatMockTime(Date.now()),
+    },
+    ...balanceLogs,
+  ]
 }
 
 /**
@@ -211,7 +233,17 @@ export const mockApi: ClientApi = {
   },
 
   orderApi: {
-    list: (status) => delay(status ? orders.filter((o) => o.status === status) : orders),
+    list: (status, page = 1, pageSize = 10) => {
+      const filtered = status ? orders.filter((o) => o.status === status) : orders
+      const start = (page - 1) * pageSize
+      return delay({
+        list: filtered.slice(start, start + pageSize),
+        page,
+        pageSize,
+        total: filtered.length,
+        totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+      })
+    },
     detail: (orderNo) => delay(orders.find((o) => o.orderNo === orderNo)),
     create: (_payload?: CreateOrderPayload): Promise<Order> => delay(orders[0]),
     cancel: (orderNo) => {
@@ -358,6 +390,8 @@ export const mockApi: ClientApi = {
 
   userApi: {
     login: (): Promise<LoginResult> => delay({ user: demoUser, token: 'mock-token', refreshToken: 'mock-refresh' }),
+    loginBySms: (): Promise<LoginResult> =>
+      delay({ user: demoUser, token: 'mock-token', refreshToken: 'mock-refresh' }),
     captcha: () =>
       delay({
         captchaId: 'mock-captcha',
@@ -373,6 +407,17 @@ export const mockApi: ClientApi = {
       return delay({ ...demoUser })
     },
     changePassword: () => delay({ changed: true }),
+    setPayPassword: () => delay({ hasPayPassword: true }),
+    loginLogs: (): Promise<LoginLogItem[]> =>
+      delay([
+        {
+          id: 1,
+          loginType: 1,
+          ip: '127.0.0.1',
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120',
+          loginAt: '2026-10-30 10:00:00',
+        },
+      ]),
     sendSmsCode: (phone: string) => delay({ phone, code: '8888' }),
     resetPassword: () => delay({ reset: true }),
     favorites: () => delay(mockProducts.slice(0, 4)),
@@ -412,30 +457,100 @@ export const mockApi: ClientApi = {
 
   paymentApi: {
     prepay: (payload: PrepayPayload): Promise<PrepayResult> => {
-      const payNo = `PAY${Date.now()}`
-      payRecords.set(payNo, payload.orderNo)
       const order = orders.find((o) => o.orderNo === payload.orderNo)
+      if (!order) return rejectWith<PrepayResult>('订单不存在')
+      if (payload.channel === 3 && walletBalance < order.payAmount) {
+        return rejectWith<PrepayResult>('余额不足，请选择其它支付方式')
+      }
+      const payNo = `PAY${Date.now()}`
+      payRecords.set(payNo, { orderNo: payload.orderNo, channel: payload.channel })
       return delay({
         payNo,
-        amount: order?.payAmount ?? 0,
+        amount: order.payAmount,
         payParams: { sandboxToken: 'mock-token', channel: String(payload.channel) },
         payUrl: null,
       })
     },
     status: (payNo: string): Promise<PayStatusResult> => {
-      const orderNo = payRecords.get(payNo) ?? ''
-      const order = orders.find((o) => o.orderNo === orderNo)
+      const rec = payRecords.get(payNo)
+      const order = orders.find((o) => o.orderNo === rec?.orderNo)
       return delay({
         payNo,
         payStatus: order && order.status !== 10 ? 1 : 0,
-        orderNo,
+        orderNo: rec?.orderNo ?? '',
         orderStatus: order?.status ?? null,
       })
     },
     sandboxPay: (payload: SandboxPayPayload): Promise<void> => {
-      const orderNo = payRecords.get(payload.payNo)
-      const order = orders.find((o) => o.orderNo === orderNo)
-      if (order) order.status = 20
+      const rec = payRecords.get(payload.payNo)
+      const order = orders.find((o) => o.orderNo === rec?.orderNo)
+      if (!rec || !order) return rejectWith<void>('支付单不存在')
+      if (rec.channel === 3) {
+        if (walletBalance < order.payAmount) return rejectWith<void>('余额不足，支付失败')
+        appendBalanceLog(2, -order.payAmount, order.orderNo, `订单 ${order.orderNo} 余额支付`)
+      }
+      order.status = 20
+      return delay(undefined as void)
+    },
+  },
+
+  walletApi: {
+    mine: (): Promise<MyWallet> =>
+      delay({
+        balance: walletBalance,
+        totalRecharged: balanceLogs
+          .filter((l) => l.type === 1)
+          .reduce((sum, l) => sum + l.change, 0),
+        logs: [...balanceLogs],
+        recharges: [...rechargeRecords],
+      }),
+    create: (payload: RechargePayload): Promise<PrepayResult> => {
+      const amount = Math.round(payload.amount * 100) / 100
+      if (!Number.isFinite(amount) || amount < 0.01 || amount > 50000) {
+        return rejectWith<PrepayResult>('充值金额需在 ¥0.01 ~ ¥50000 之间')
+      }
+      const payNo = `RCP${Date.now()}`
+      rechargePrepay.set(payNo, { amount, channel: payload.channel })
+      rechargeRecords = [
+        {
+          payNo,
+          amount,
+          channel: payload.channel,
+          status: 0,
+          paidAt: '',
+          createdAt: formatMockTime(Date.now()),
+        },
+        ...rechargeRecords,
+      ]
+      return delay({
+        payNo,
+        amount,
+        payParams: { sandboxToken: 'mock-token', channel: String(payload.channel) },
+        payUrl: null,
+      })
+    },
+    status: (payNo: string): Promise<RechargeStatusResult> => {
+      const record = rechargeRecords.find((r) => r.payNo === payNo)
+      return delay({
+        payNo,
+        payStatus: record?.status ?? 0,
+        amount: record?.amount ?? 0,
+        balance: walletBalance,
+        paidAt: record?.paidAt ?? '',
+      })
+    },
+    sandboxPay: (payload: SandboxPayPayload): Promise<void> => {
+      const ready = rechargePrepay.get(payload.payNo)
+      const record = rechargeRecords.find((r) => r.payNo === payload.payNo)
+      if (!ready || !record) return rejectWith<void>('充值单不存在')
+      if ((payload.channel ?? 4) !== ready.channel) return rejectWith<void>('支付渠道与充值单不一致')
+      if (record.status === 1) return delay(undefined as void)
+      if (Math.abs(ready.amount - payload.amount) > 0.001) {
+        return rejectWith<void>('充值金额与支付金额不一致')
+      }
+      record.status = 1
+      record.paidAt = formatMockTime(Date.now())
+      appendBalanceLog(1, ready.amount, record.payNo, '账户余额充值')
       return delay(undefined as void)
     },
   },
@@ -465,6 +580,7 @@ export const mockApi: ClientApi = {
       return delay(refund)
     },
     mine: () => delay(refunds),
+    uploadImage: (file: File) => delay({ url: URL.createObjectURL(file) }),
   },
 
   commentApi: {
@@ -485,6 +601,7 @@ export const mockApi: ClientApi = {
         replyContent: '',
         status: 1,
         createdAt: formatMockTime(Date.now()),
+        rewardPoints: 5,
       })
     },
     uploadImage: (file: File) => delay({ url: URL.createObjectURL(file) }),

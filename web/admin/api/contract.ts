@@ -9,6 +9,7 @@ import type {
   AdminFaq,
   AdminFeedback,
   AdminFreightTemplate,
+  AdminHomeFloor,
   AdminInvoice,
   AdminLevel,
   AdminLogItem,
@@ -31,13 +32,20 @@ import type {
   AdminSetting,
   AdminSku,
   AdminSkuPayload,
+  AdminTag,
   AdminUserDetail,
   AdminUserItem,
   CategorySalesItem,
+  DailyStatItem,
   FinanceRecordItem,
+  FinanceReport,
+  HomeFloorPayload,
   InventoryLogItem,
+  MarketingActivityStats,
   Order,
+  OrderStatusStat,
   ProductRankItem,
+  PromotionThreshold,
   ProductImportResult,
   Reconciliation,
   SalesTrendPoint,
@@ -64,7 +72,7 @@ export interface SeckillPayload {
 export interface PromotionPayload {
   name: string
   type?: number
-  thresholds: { amount: number; reduce: number }[]
+  thresholds: PromotionThreshold[]
   startTime: string
   endTime: string
   status?: number
@@ -160,6 +168,13 @@ export interface AdminApi {
     ): Promise<Order>
     close(orderNo: string, reason: string): Promise<Order>
     remark(orderNo: string, remark: string): Promise<{ orderNo: string; adminRemark: string }>
+    /** 修改运单号（A-22） */
+    updateShipping(orderNo: string, payload: { company: string; trackingNo: string }): Promise<Order>
+    /** 异常标记（A-23） */
+    markAbnormal(
+      orderNo: string,
+      payload: { abnormal: boolean; reason?: string },
+    ): Promise<{ orderNo: string; isAbnormal: boolean; abnormalReason: string }>
     export(query?: AdminOrderQuery): Promise<void>
     batchShip(
       orders: { orderNo: string; company: string; trackingNo: string }[],
@@ -220,15 +235,33 @@ export interface AdminApi {
     image(file: File): Promise<{ url: string }>
   }
   userApi: {
-    list(query?: { keyword?: string; status?: number; page?: number; pageSize?: number }): Promise<PageResult<AdminCustomer>>
+    list(query?: {
+      keyword?: string
+      status?: number
+      tagId?: number
+      page?: number
+      pageSize?: number
+    }): Promise<PageResult<AdminCustomer>>
     detail(id: number): Promise<AdminUserDetail>
     setStatus(id: number, status: 0 | 1): Promise<{ id: number; status: number }>
     points(id: number, page?: number, pageSize?: number): Promise<PageResult<AdminPointsLog> & { balance: number }>
     adjustPoints(id: number, change: number, remark?: string): Promise<{ balance: number; change: number }>
+    /** 覆盖式设置用户标签（A-35） */
+    setTags(id: number, tagIds: number[]): Promise<{ userId: number; tagIds: number[] }>
+    /** 调整余额（U-30） */
+    adjustBalance(id: number, change: number): Promise<{ id: number; balance: number }>
+  }
+  tagApi: {
+    list(): Promise<AdminTag[]>
+    create(name: string): Promise<AdminTag>
+    update(id: number, name: string): Promise<{ id: number; name: string }>
+    remove(id: number): Promise<void>
   }
   refundApi: {
     list(query?: { status?: number; orderNo?: string; page?: number; pageSize?: number }): Promise<PageResult<AdminRefund>>
     audit(id: number, payload: { approve: boolean; remark?: string }): Promise<AdminRefund>
+    /** 确认收到退货：退货退款执行退款，换货完成换货 */
+    receive(id: number, remark?: string): Promise<AdminRefund>
   }
   marketingApi: {
     coupons(query?: { keyword?: string; status?: number; page?: number; pageSize?: number }): Promise<PageResult<AdminCoupon>>
@@ -252,6 +285,12 @@ export interface AdminApi {
     createPromotion(payload: PromotionPayload): Promise<AdminPromotion>
     updatePromotion(id: number, payload: Partial<PromotionPayload>): Promise<AdminPromotion>
     removePromotion(id: number): Promise<void>
+  }
+  homeFloorApi: {
+    list(): Promise<AdminHomeFloor[]>
+    create(payload: HomeFloorPayload): Promise<{ id: number }>
+    update(id: number, payload: Partial<HomeFloorPayload>): Promise<{ id: number }>
+    remove(id: number): Promise<void>
   }
   commentApi: {
     list(query?: {
@@ -287,11 +326,15 @@ export interface AdminApi {
     removeTemplate(id: number): Promise<void>
   }
   statsApi: {
-    overview(): Promise<AdminOverview>
+    overview(range?: 'today' | 'yesterday' | '7d' | '30d' | 'all'): Promise<AdminOverview>
     salesTrend(days?: number): Promise<SalesTrendPoint[]>
-    productRank(sortBy?: 'sales' | 'amount', limit?: number): Promise<ProductRankItem[]>
+    daily(days?: number): Promise<DailyStatItem[]>
+    productRank(sortBy?: 'sales' | 'amount' | 'cart', limit?: number): Promise<ProductRankItem[]>
     categorySales(): Promise<CategorySalesItem[]>
     userAnalysis(days?: number): Promise<UserAnalysis>
+    orderStatus(): Promise<OrderStatusStat[]>
+    marketing(): Promise<MarketingActivityStats>
+    export(type: 'sales' | 'rank' | 'category' | 'status'): Promise<void>
   }
   financeApi: {
     records(query?: {
@@ -304,5 +347,7 @@ export interface AdminApi {
     reconciliation(query?: { startTime?: string; endTime?: string }): Promise<Reconciliation>
     invoices(page?: number, pageSize?: number): Promise<PageResult<AdminInvoice>>
     setInvoiceStatus(id: number, status: 0 | 1): Promise<{ id: number; status: number }>
+    /** 财务报表（A-64） */
+    report(year: number): Promise<FinanceReport>
   }
 }

@@ -4,6 +4,7 @@ import {
   Brand,
   Category,
   Product,
+  ProductAttribute,
   ProductComment,
   ProductImage,
   ProductSku,
@@ -18,10 +19,12 @@ import {
   toSeckillDto,
   type ProductWithRelations,
 } from '../utils/serializers'
+import { getActiveFloorConfigs } from './homeFloorService'
 
 const productInclude = [
   { model: ProductSku, as: 'skus' },
   { model: ProductImage, as: 'imageList' },
+  { model: ProductAttribute, as: 'attributes' },
   {
     model: Category,
     as: 'category',
@@ -181,21 +184,52 @@ export async function getHomeData() {
     limit: 10,
   })
 
-  const floors = []
-  for (const top of tops.slice(0, 4)) {
-    const ids = await resolveCategoryIds(top.id)
-    const products = await Product.findAll({
-      where: { status: 1, categoryId: { [Op.in]: ids } },
-      include: productInclude,
-      order: [['salesCount', 'DESC']],
-      limit: 8,
-    })
-    floors.push({
-      title: top.name,
-      subtitle: '精选好物 品质保障',
-      categoryId: top.id,
-      products: products.map((p) => toProductDto(p as unknown as ProductWithRelations)),
-    })
+  const floors: {
+    title: string
+    subtitle: string
+    categoryId: number | null
+    products: ReturnType<typeof toProductDto>[]
+  }[] = []
+  // A-44：优先使用后台人工编排的楼层；未配置时回退为「按一级分类自动生成」
+  const configuredFloors = await getActiveFloorConfigs()
+  if (configuredFloors.length) {
+    const allIds = [...new Set(configuredFloors.flatMap((f) => f.productIds))]
+    const rows = allIds.length
+      ? await Product.findAll({
+          where: { id: { [Op.in]: allIds }, status: 1 },
+          include: productInclude,
+        })
+      : []
+    const productMap = new Map(rows.map((p) => [Number(p.id), p]))
+    for (const config of configuredFloors) {
+      const products = config.productIds
+        .map((id) => productMap.get(id))
+        .filter((p): p is Product => Boolean(p))
+        .map((p) => toProductDto(p as unknown as ProductWithRelations))
+      if (!products.length) continue
+      floors.push({
+        title: config.title,
+        subtitle: config.subtitle || '精选好物 品质保障',
+        categoryId: config.categoryId,
+        products,
+      })
+    }
+  } else {
+    for (const top of tops.slice(0, 4)) {
+      const ids = await resolveCategoryIds(top.id)
+      const products = await Product.findAll({
+        where: { status: 1, categoryId: { [Op.in]: ids } },
+        include: productInclude,
+        order: [['salesCount', 'DESC']],
+        limit: 8,
+      })
+      floors.push({
+        title: top.name,
+        subtitle: '精选好物 品质保障',
+        categoryId: top.id,
+        products: products.map((p) => toProductDto(p as unknown as ProductWithRelations)),
+      })
+    }
   }
 
   const categoryDto = tops.map((c) => ({

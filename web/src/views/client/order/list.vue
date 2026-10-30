@@ -8,6 +8,7 @@ import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import Pagination from '@/components/Pagination.vue'
 import PriceTag from '@/components/PriceTag.vue'
 import LogisticsDialog from './components/LogisticsDialog.vue'
 import PayDialog from './components/PayDialog.vue'
@@ -19,6 +20,10 @@ const ui = useUiStore()
 const orders = ref<Order[]>([])
 const loading = ref(true)
 const active = ref<number | 'all'>('all')
+const page = ref(1)
+const pageSize = 10
+const total = ref(0)
+const totalPages = ref(1)
 const payVisible = ref(false)
 const payOrder = ref<Order | null>(null)
 
@@ -30,10 +35,6 @@ const deleteTarget = ref<Order | null>(null)
 const deleting = ref(false)
 
 const tabs = ORDER_TABS
-
-const filtered = computed(() =>
-  active.value === 'all' ? orders.value : orders.value.filter((o) => o.status === active.value),
-)
 
 const deleteMessage = computed(() =>
   deleteTarget.value
@@ -49,8 +50,33 @@ function statusClass(status: number): string {
 
 async function load() {
   loading.value = true
-  orders.value = await orderApi.list()
-  loading.value = false
+  try {
+    const res = await orderApi.list(
+      active.value === 'all' ? undefined : active.value,
+      page.value,
+      pageSize,
+    )
+    orders.value = res.list
+    total.value = res.total
+    totalPages.value = res.totalPages
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '订单加载失败', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 切换状态页签：回到第一页并按状态重新查询 */
+function switchTab(key: number | 'all') {
+  if (active.value === key) return
+  active.value = key
+  page.value = 1
+  load()
+}
+
+function changePage(next: number) {
+  page.value = next
+  load()
 }
 
 type OrderActionKey =
@@ -72,7 +98,7 @@ interface OrderAction {
 }
 
 function hasPendingComment(order: Order): boolean {
-  return order.status === 40 && order.items.some((it) => !it.isCommented)
+  return order.status === 40 && order.items.some((it) => !it.isCommented && !it.isGift)
 }
 
 function actionsFor(order: Order): OrderAction[] {
@@ -228,7 +254,7 @@ onMounted(load)
     <div class="container">
       <div class="orders card">
         <header class="orders__head">
-          <h1>我的订单</h1>
+          <h1>我的订单 <span class="muted">共 {{ total }} 单</span></h1>
         </header>
 
         <div class="orders__tabs">
@@ -236,7 +262,7 @@ onMounted(load)
             v-for="t in tabs"
             :key="t.key"
             :class="{ 'is-active': active === t.key }"
-            @click="active = t.key"
+            @click="switchTab(t.key)"
           >
             {{ t.label }}
           </button>
@@ -244,8 +270,8 @@ onMounted(load)
 
         <div v-if="loading" class="orders__loading">正在加载订单…</div>
 
-        <template v-else-if="filtered.length">
-          <article v-for="o in filtered" :key="o.orderNo" class="order">
+        <template v-else-if="orders.length">
+          <article v-for="o in orders" :key="o.orderNo" class="order">
             <header class="order__head">
               <div class="order__meta">
                 <span>{{ o.createdAt }}</span>
@@ -289,6 +315,13 @@ onMounted(load)
         <EmptyState v-else icon="📦" title="暂无相关订单" desc="快去挑选好物，开启第一单吧">
           <router-link to="/" class="btn btn-primary">去逛逛</router-link>
         </EmptyState>
+
+        <Pagination
+          v-if="!loading && totalPages > 1"
+          :page="page"
+          :total-pages="totalPages"
+          @change="changePage"
+        />
       </div>
 
       <PayDialog

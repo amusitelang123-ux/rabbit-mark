@@ -1,10 +1,11 @@
 import { sequelize } from '../config/database'
-import { Order, PaymentRecord } from '../models'
+import { Order, PaymentRecord, User } from '../models'
 import { AppError } from '../utils/errors'
-import { ERR, ORDER_STATUS, PAY_STATUS } from '../constants'
+import { ERR, BALANCE_LOG_TYPE, ORDER_STATUS, PAY_CHANNEL, PAY_STATUS } from '../constants'
 import { generateNo } from '../utils/helpers'
 import { getPaymentAdapter } from '../adapters/payment'
 import type { PayChannel } from '../adapters/payment'
+import { applyBalance } from './walletService'
 import * as orderService from './orderService'
 
 export interface PrepayInput {
@@ -18,6 +19,14 @@ export async function prepay(userId: number, input: PrepayInput) {
   if (!order) throw AppError.notFound('订单不存在')
   if (order.status !== ORDER_STATUS.PENDING_PAY) {
     throw new AppError('当前订单状态不可支付', ERR.ORDER_STATUS_INVALID)
+  }
+  // 余额支付：先校验余额，回调时在事务内二次校验并扣减
+  if (input.channel === PAY_CHANNEL.BALANCE) {
+    const user = await User.findByPk(userId)
+    if (!user) throw AppError.notFound('用户不存在')
+    if (Number(user.balance) < Number(order.payAmount)) {
+      throw new AppError('余额不足，请选择其它支付方式', ERR.BALANCE_NOT_ENOUGH)
+    }
   }
 
   let record = await PaymentRecord.findOne({
@@ -84,6 +93,18 @@ export async function handleCallback(channel: PayChannel, raw: unknown) {
 
     if (Number(record.amount) !== Number(payload.amount)) {
       throw new AppError('支付金额与订单金额不一致', ERR.PAY_AMOUNT_MISMATCH)
+    }
+
+    // 余额支付：扣减账户余额并写资金流水（与支付单、订单状态同事务）
+    if (channel === PAY_CHANNEL.BALANCE) {
+      await applyBalance(
+        record.userId,
+        BALANCE_LOG_TYPE.PAYMENT,
+        -Number(record.amount),
+        `订单 ${record.orderNo} 余额支付`,
+        record.orderNo,
+        transaction,
+      )
     }
 
     record.status = PAY_STATUS.SUCCESS

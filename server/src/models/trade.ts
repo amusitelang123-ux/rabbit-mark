@@ -42,6 +42,9 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare seckillAmount: CreationOptional<string>
   declare promotionAmount: CreationOptional<string>
   declare couponAmount: CreationOptional<string>
+  /** 积分抵现：本单消耗积分与抵扣金额（U-64） */
+  declare pointsUsed: CreationOptional<number>
+  declare pointsAmount: CreationOptional<string>
   declare freightAmount: CreationOptional<string>
   declare payAmount: CreationOptional<string>
   declare paidAmount: CreationOptional<string>
@@ -57,6 +60,9 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare receiverAddress: string | null
   declare remark: string | null
   declare adminRemark: string | null
+  /** 后台异常标记：运营标识，不改变订单状态机 */
+  declare isAbnormal: CreationOptional<number>
+  declare abnormalReason: string | null
   /** 用户侧逻辑删除（仅隐藏，不做物理删除） */
   declare userDeleted: CreationOptional<number>
   declare userDeletedAt: Date | null
@@ -79,6 +85,8 @@ Order.init(
     seckillAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     promotionAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     couponAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    pointsUsed: { type: DataTypes.INTEGER, defaultValue: 0 },
+    pointsAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     freightAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     payAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     paidAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
@@ -94,6 +102,8 @@ Order.init(
     receiverAddress: { type: DataTypes.STRING(255), allowNull: true },
     remark: { type: DataTypes.STRING(255), allowNull: true },
     adminRemark: { type: DataTypes.STRING(255), allowNull: true },
+    isAbnormal: { type: DataTypes.TINYINT, defaultValue: 0 },
+    abnormalReason: { type: DataTypes.STRING(255), allowNull: true },
     userDeleted: { type: DataTypes.TINYINT, defaultValue: 0 },
     userDeletedAt: { type: DataTypes.DATE, allowNull: true },
     remindShipCount: { type: DataTypes.INTEGER, defaultValue: 0 },
@@ -119,6 +129,8 @@ export class OrderItem extends Model<InferAttributes<OrderItem>, InferCreationAt
   declare quantity: number
   declare subtotal: string
   declare discountAmount: CreationOptional<string>
+  /** 满赠赠品标记（U-62） */
+  declare isGift: CreationOptional<number>
   declare isCommented: CreationOptional<number>
   declare refundStatus: CreationOptional<number>
   declare createdAt: CreationOptional<Date>
@@ -140,6 +152,7 @@ OrderItem.init(
     quantity: { type: DataTypes.INTEGER, allowNull: false },
     subtotal: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
     discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    isGift: { type: DataTypes.TINYINT, defaultValue: 0 },
     isCommented: { type: DataTypes.TINYINT, defaultValue: 0 },
     refundStatus: { type: DataTypes.TINYINT, defaultValue: 0 },
     createdAt: DataTypes.DATE,

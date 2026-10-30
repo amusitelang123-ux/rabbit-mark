@@ -1,5 +1,15 @@
 import { sequelize } from '../config/database'
-import { User, UserAddress, UserFavorite, UserFootprint, UserLevel, UserPointsLog } from './user'
+import {
+  User,
+  UserAddress,
+  UserFavorite,
+  UserFootprint,
+  UserLevel,
+  UserLoginLog,
+  UserPointsLog,
+  UserTag,
+  UserTagRelation,
+} from './user'
 import {
   Brand,
   Category,
@@ -33,7 +43,17 @@ import {
   UserCoupon,
 } from './marketing'
 import { AdminUser, AdminLog, Permission, Role, RolePermission } from './admin'
-import { Faq, Feedback, FreightTemplate, LogisticsCompany, Setting } from './content'
+import {
+  Faq,
+  Feedback,
+  FreightTemplate,
+  HomeFloor,
+  HomeFloorProduct,
+  LogisticsCompany,
+  Setting,
+} from './content'
+import { StatDaily } from './stat'
+import { BalanceLog, BalanceRecharge } from './wallet'
 
 /* ------------------------------ Associations ------------------------------ */
 
@@ -48,6 +68,19 @@ UserFavorite.belongsTo(User, { foreignKey: 'userId', as: 'user' })
 
 User.hasMany(UserFootprint, { foreignKey: 'userId', as: 'footprints' })
 UserFootprint.belongsTo(User, { foreignKey: 'userId', as: 'user' })
+
+User.hasMany(UserLoginLog, { foreignKey: 'userId', as: 'loginLogs' })
+UserLoginLog.belongsTo(User, { foreignKey: 'userId', as: 'user' })
+
+User.hasMany(BalanceRecharge, { foreignKey: 'userId', as: 'recharges' })
+BalanceRecharge.belongsTo(User, { foreignKey: 'userId', as: 'user' })
+User.hasMany(BalanceLog, { foreignKey: 'userId', as: 'balanceLogs' })
+BalanceLog.belongsTo(User, { foreignKey: 'userId', as: 'user' })
+
+User.hasMany(UserTagRelation, { foreignKey: 'userId', as: 'tagRelations' })
+UserTagRelation.belongsTo(User, { foreignKey: 'userId', as: 'user' })
+UserTagRelation.belongsTo(UserTag, { foreignKey: 'tagId', as: 'tag' })
+UserTag.hasMany(UserTagRelation, { foreignKey: 'tagId', as: 'relations' })
 
 Category.hasMany(Category, { foreignKey: 'parentId', as: 'children' })
 Category.belongsTo(Category, { foreignKey: 'parentId', as: 'parent' })
@@ -119,6 +152,10 @@ AdminUser.hasMany(AdminLog, { foreignKey: 'adminId', as: 'logs' })
 AdminLog.belongsTo(AdminUser, { foreignKey: 'adminId', as: 'admin' })
 Feedback.belongsTo(User, { foreignKey: 'userId', as: 'user' })
 
+HomeFloor.hasMany(HomeFloorProduct, { foreignKey: 'floorId', as: 'items' })
+HomeFloorProduct.belongsTo(HomeFloor, { foreignKey: 'floorId', as: 'floor' })
+HomeFloorProduct.belongsTo(Product, { foreignKey: 'productId', as: 'product' })
+
 export {
   sequelize,
   User,
@@ -127,6 +164,11 @@ export {
   UserFavorite,
   UserFootprint,
   UserPointsLog,
+  UserLoginLog,
+  UserTag,
+  UserTagRelation,
+  BalanceRecharge,
+  BalanceLog,
   Category,
   Brand,
   Product,
@@ -163,4 +205,7 @@ export {
   FreightTemplate,
   Setting,
   Feedback,
+  HomeFloor,
+  HomeFloorProduct,
+  StatDaily,
 }

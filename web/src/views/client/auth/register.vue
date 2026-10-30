@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { userApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
@@ -17,13 +18,23 @@ const password = ref('')
 const confirm = ref('')
 const agreed = ref(false)
 const loading = ref(false)
+const sending = ref(false)
 
-function sendCode() {
+async function sendCode() {
   if (!/^1\d{10}$/.test(phone.value)) {
     ui.toast('请输入正确的手机号', 'error')
     return
   }
-  ui.toast('验证码已发送（演示：8888）')
+  if (sending.value) return
+  sending.value = true
+  try {
+    const res = await userApi.sendSmsCode(phone.value)
+    ui.toast(`验证码已发送（演示：${res.code}）`)
+  } catch (err) {
+    ui.toast(err instanceof Error ? err.message : '验证码发送失败', 'error')
+  } finally {
+    sending.value = false
+  }
 }
 
 const strength = computed(() => {
@@ -59,14 +70,18 @@ async function submit() {
   }
   loading.value = true
   try {
-    await user.register({
+    const result = await user.register({
       username: username.value,
       phone: phone.value,
       password: password.value,
       code: code.value,
     })
     await cart.load()
-    ui.toast('注册成功，已自动登录')
+    ui.toast(
+      result.newUserCoupons
+        ? `注册成功，已发放 ${result.newUserCoupons} 张新人券`
+        : '注册成功，已自动登录',
+    )
     router.replace('/')
   } catch (err) {
     ui.toast(err instanceof Error ? err.message : '注册失败', 'error')
@@ -104,7 +119,9 @@ async function submit() {
             <label for="code">短信验证码</label>
             <div class="code-row">
               <input id="code" v-model="code" class="input" placeholder="请输入验证码" />
-              <button type="button" class="btn btn-secondary" @click="sendCode">获取验证码</button>
+              <button type="button" class="btn btn-secondary" :disabled="sending" @click="sendCode">
+                {{ sending ? '发送中…' : '获取验证码' }}
+              </button>
             </div>
           </div>
           <div class="field">

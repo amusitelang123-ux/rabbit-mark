@@ -292,6 +292,8 @@ export const demoUser: UserInfo = {
   levelName: '黄金会员',
   points: 2860,
   totalSpent: 6823.5,
+  balance: 200,
+  hasPayPassword: false,
 }
 
 /* ------------------------------- Orders -------------------------------- */

@@ -13,11 +13,18 @@ const total = ref(0)
 const query = reactive({ status: undefined as number | undefined, orderNo: '', page: 1, pageSize: 10 })
 
 const REFUND_TYPE_TEXT: Record<number, string> = { 1: '仅退款', 2: '退货退款', 3: '换货' }
-const REFUND_STATUS_TEXT: Record<number, string> = { 0: '待审核', 1: '已同意', 2: '已拒绝', 3: '已退款' }
+const REFUND_STATUS_TEXT: Record<number, string> = {
+  0: '待审核',
+  1: '已同意',
+  2: '已拒绝',
+  3: '已退款',
+  4: '待收货',
+  5: '已换货',
+}
 
 function statusType(status: number) {
-  if (status === 0) return 'warning'
-  if (status === 3) return 'success'
+  if (status === 0 || status === 4) return 'warning'
+  if (status === 3 || status === 5) return 'success'
   if (status === 2) return 'danger'
   return 'primary'
 }
@@ -60,7 +67,31 @@ async function audit(row: AdminRefund, approve: boolean) {
   }
   try {
     await adminApi.refundApi.audit(row.id, { approve, remark })
-    ElMessage.success(approve ? '已同意并退款' : '已拒绝')
+    ElMessage.success(
+      approve ? (row.type === 1 ? '已同意并退款' : '已同意，等待买家退货') : '已拒绝',
+    )
+    load()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '操作失败')
+  }
+}
+
+/** A-24：确认收到退货（退货退款 → 执行退款；换货 → 完成换货） */
+async function receive(row: AdminRefund) {
+  let remark = ''
+  try {
+    const res = await ElMessageBox.prompt(
+      row.type === 2 ? '确认已收到退货？确认后将执行退款并回补库存' : '确认已收到换货商品？',
+      '确认收货',
+      { inputValue: '已收到退货', inputPlaceholder: '备注（可选）' },
+    )
+    remark = res.value
+  } catch {
+    return
+  }
+  try {
+    await adminApi.refundApi.receive(row.id, remark)
+    ElMessage.success(row.type === 2 ? '已确认收货并退款' : '换货已完成')
     load()
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '操作失败')
@@ -120,6 +151,9 @@ onMounted(load)
               <el-button link type="primary" @click="audit(row, true)">同意</el-button>
               <el-button link type="danger" @click="audit(row, false)">拒绝</el-button>
             </template>
+            <el-button v-else-if="row.status === 4" link type="success" @click="receive(row)">
+              确认收货
+            </el-button>
             <span v-else class="muted">{{ row.auditRemark || '—' }}</span>
           </template>
         </el-table-column>
