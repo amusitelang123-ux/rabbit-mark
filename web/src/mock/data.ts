@@ -319,7 +319,9 @@ const STATUSES: OrderStatus[] = [10, 20, 30, 40, 70, 40, 20, 10]
 export const orders: Order[] = STATUSES.map((status, i) => {
   const p1 = products[i % products.length]
   const p2 = products[(i + 5) % products.length]
-  const items = [orderItems(p1, i, (i % 2) + 1, status === 40), ...(i % 2 === 0 ? [orderItems(p2, i + 1, 1, status === 40)] : [])]
+  // 保留部分已完成订单未评价，便于演示「评价晒单」
+  const commented = status === 40 && i % 3 !== 0
+  const items = [orderItems(p1, i, (i % 2) + 1, commented), ...(i % 2 === 0 ? [orderItems(p2, i + 1, 1, commented)] : [])]
   const totalAmount = addMoney(...items.map((it) => it.subtotal))
   const couponAmount = i % 3 === 0 ? Math.min(30, Math.round(totalAmount * 0.1)) : 0
   const promotionAmount = totalAmount >= 199 ? 20 : 0
@@ -345,6 +347,8 @@ export const orders: Order[] = STATUSES.map((status, i) => {
     payTime: status === 10 ? null : createdAt,
     shipTime: status >= 30 ? createdAt : null,
     receiveTime: status === 40 ? createdAt : null,
+    remindShipCount: 0,
+    lastRemindShipAt: null,
     remark: i % 2 === 0 ? '请尽快发货，谢谢' : '',
     createdAt,
     logs: [

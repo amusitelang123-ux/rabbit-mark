@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { fn, col } from 'sequelize'
+import { fn, col, Op } from 'sequelize'
 import { AdminUser, AdminLog, Order, Permission, Product, Role, RolePermission, User } from '../models'
 import { AppError } from '../utils/errors'
 import { ERR, ORDER_STATUS } from '../constants'
@@ -106,23 +106,29 @@ export async function me(adminId: number) {
 
 export async function overview() {
   const paidStatuses = [ORDER_STATUS.PAID, ORDER_STATUS.SHIPPED, ORDER_STATUS.FINISHED]
-  const [orderCount, paidOrderCount, gmvRow, userCount, productCount] = await Promise.all([
-    Order.count(),
-    Order.count({ where: { status: paidStatuses } }),
-    Order.findOne({
-      where: { status: paidStatuses },
-      attributes: [[fn('SUM', col('pay_amount')), 'gmv']],
-      raw: true,
-    }),
-    User.count(),
-    Product.count({ where: { status: 1 } }),
-  ])
+  const [orderCount, paidOrderCount, gmvRow, userCount, productCount, pendingRemindCount] =
+    await Promise.all([
+      Order.count(),
+      Order.count({ where: { status: paidStatuses } }),
+      Order.findOne({
+        where: { status: paidStatuses },
+        attributes: [[fn('SUM', col('pay_amount')), 'gmv']],
+        raw: true,
+      }),
+      User.count(),
+      Product.count({ where: { status: 1 } }),
+      // 待发货且用户已催发货的订单，后台首页与订单列表用于醒目提醒
+      Order.count({
+        where: { status: ORDER_STATUS.PAID, remindShipCount: { [Op.gt]: 0 } },
+      }),
+    ])
   const gmv = Number((gmvRow as unknown as { gmv: string | null } | null)?.gmv ?? 0)
   return {
     orderCount,
     gmv,
     userCount,
     productCount,
+    pendingRemindCount,
     // 客单价 = GMV ÷ 已支付口径订单数（20 已付款 / 30 已发货 / 40 已完成）；
     // 分母不再含待付款、已关闭、已退款订单，避免被未成交订单稀释。
     avgOrderAmount: paidOrderCount ? Math.round((gmv / paidOrderCount) * 100) / 100 : 0,

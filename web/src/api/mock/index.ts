@@ -1,4 +1,4 @@
-import type { Address, CommentItem, Coupon, CouponPreviewResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Refund } from '../types'
+import type { Address, CartItem, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, RebuyResult, Refund, RebuySkippedItem, RemindShipResult } from '../types'
 import type {
   AddressPayload,
   ApplyRefundPayload,
@@ -24,6 +24,7 @@ import {
   coupons as mockCoupons,
   demoUser,
   notices as mockNotices,
+  orderStatusText,
   orders as mockOrders,
   products as mockProducts,
   seckills as mockSeckills,
@@ -62,7 +63,42 @@ let addresses: Address[] = [...mockAddresses]
 let orders: Order[] = [...mockOrders]
 let cart: { id: number; productId: number; skuId: number; quantity: number; selected: boolean }[] = []
 const payRecords = new Map<string, string>()
+const remindRecords = new Map<string, number>()
 let refunds: Refund[] = []
+
+/** 与后端 formatDate 保持一致的展示格式 */
+function formatMockTime(value: number | Date): string {
+  const d = value instanceof Date ? value : new Date(value)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/**
+ * Mock 模式下购物车 Store 以 localStorage 为数据源（见 stores/cart.ts），
+ * 「再次购买」走的是 orderApi，需要把结果同步进本地购物车，否则跳转后仍是旧数据。
+ */
+const LOCAL_CART_KEY = 'xtx_cart'
+
+function mergeLocalCart(items: CartItem[]) {
+  if (typeof localStorage === 'undefined' || !items.length) return
+  let current: CartItem[] = []
+  try {
+    const raw = localStorage.getItem(LOCAL_CART_KEY)
+    current = raw ? (JSON.parse(raw) as CartItem[]) : []
+  } catch {
+    current = []
+  }
+  for (const item of items) {
+    const existing = current.find((c) => c.skuId === item.skuId)
+    if (existing) {
+      existing.quantity += item.quantity
+      existing.selected = true
+    } else {
+      current.unshift(item)
+    }
+  }
+  localStorage.setItem(LOCAL_CART_KEY, JSON.stringify(current))
+}
 
 function cartView() {
   return cart
@@ -187,6 +223,112 @@ export const mockApi: ClientApi = {
       const order = orders.find((o) => o.orderNo === orderNo)
       if (order) order.status = 40
       return delay(order as Order)
+    },
+    rebuy: (orderNo): Promise<RebuyResult> => {
+      const order = orders.find((o) => o.orderNo === orderNo)
+      if (!order) return rejectWith('订单不存在')
+      const skipped: RebuySkippedItem[] = []
+      const localItems: CartItem[] = []
+      let addedCount = 0
+      for (const item of order.items) {
+        const product = mockProducts.find((p) => p.id === item.productId)
+        const sku = product?.skus.find((s) => s.id === item.skuId)
+        if (!product || !sku) {
+          skipped.push({ productName: item.productName, reason: '商品已下架' })
+          continue
+        }
+        if (sku.stock < item.quantity) {
+          skipped.push({ productName: item.productName, reason: '库存不足' })
+          continue
+        }
+        const existing = cart.find((c) => c.skuId === item.skuId)
+        if (existing) {
+          existing.quantity += item.quantity
+          existing.selected = true
+        } else {
+          cart = [
+            {
+              id: Date.now() + addedCount,
+              productId: item.productId,
+              skuId: item.skuId,
+              quantity: item.quantity,
+              selected: true,
+            },
+            ...cart,
+          ]
+        }
+        localItems.push({
+          id: Date.now() + addedCount,
+          productId: product.id,
+          skuId: sku.id,
+          name: product.name,
+          image: sku.image || product.mainImage,
+          specText: sku.specText,
+          price: sku.price,
+          quantity: item.quantity,
+          stock: sku.stock,
+          selected: true,
+        })
+        addedCount += 1
+      }
+      if (!addedCount) return rejectWith('商品已失效，无法再次购买')
+      mergeLocalCart(localItems)
+      return delay({
+        orderNo,
+        addedCount,
+        skippedCount: skipped.length,
+        skipped,
+        cartCount: cart.length,
+      })
+    },
+    remove: (orderNo): Promise<DeleteOrderResult> => {
+      const order = orders.find((o) => o.orderNo === orderNo)
+      if (!order) return rejectWith('订单不存在')
+      if (![40, 60, 70].includes(order.status)) return rejectWith('当前订单状态不可删除')
+      orders = orders.filter((o) => o.orderNo !== orderNo)
+      return delay({ orderNo, deleted: true })
+    },
+    remindShip: (orderNo): Promise<RemindShipResult> => {
+      const order = orders.find((o) => o.orderNo === orderNo)
+      if (!order) return rejectWith('订单不存在')
+      if (order.status !== 20) return rejectWith('当前订单状态不可提醒发货')
+      const now = Date.now()
+      const cooldownMs = 10 * 60 * 1000
+      const last = remindRecords.get(orderNo)
+      if (last && now - last < cooldownMs) {
+        return delay({
+          reminded: false,
+          duplicated: true,
+          remindCount: 1,
+          lastRemindAt: formatMockTime(last),
+          cooldownSeconds: Math.ceil((last + cooldownMs - now) / 1000),
+          nextRemindAt: formatMockTime(last + cooldownMs),
+        })
+      }
+      remindRecords.set(orderNo, now)
+      return delay({
+        reminded: true,
+        duplicated: false,
+        remindCount: 1,
+        lastRemindAt: formatMockTime(now),
+        cooldownSeconds: cooldownMs / 1000,
+        nextRemindAt: formatMockTime(now + cooldownMs),
+      })
+    },
+    logistics: (orderNo): Promise<OrderLogisticsDetail> => {
+      const order = orders.find((o) => o.orderNo === orderNo)
+      if (!order) return rejectWith('订单不存在')
+      const traces = order.logistics?.traces ?? []
+      return delay({
+        orderNo,
+        status: order.status,
+        statusText: orderStatusText[order.status],
+        company: order.logistics?.company ?? '',
+        trackingNo: order.logistics?.trackingNo ?? '',
+        shipTime: order.shipTime,
+        traces,
+        hasLogistics: Boolean(order.logistics),
+      })
     },
   },
 
@@ -327,20 +469,25 @@ export const mockApi: ClientApi = {
 
   commentApi: {
     mine: (): Promise<MyComments> => delay({ pending: [], done: [] }),
-    create: (payload: CreateCommentPayload): Promise<MyComment> =>
-      delay({
+    create: (payload: CreateCommentPayload): Promise<MyComment> => {
+      const order = orders.find((o) => o.items.some((i) => i.id === payload.orderItemId))
+      const item = order?.items.find((i) => i.id === payload.orderItemId)
+      if (item) item.isCommented = true
+      return delay({
         id: Date.now(),
-        productId: 0,
-        productName: '',
-        productImage: '',
+        productId: item?.productId ?? 0,
+        productName: item?.productName ?? '',
+        productImage: item?.productImage ?? '',
         score: payload.score,
         content: payload.content,
         images: payload.images ?? [],
         isAnonymous: Boolean(payload.isAnonymous),
         replyContent: '',
         status: 1,
-        createdAt: '',
-      }),
+        createdAt: formatMockTime(Date.now()),
+      })
+    },
+    uploadImage: (file: File) => delay({ url: URL.createObjectURL(file) }),
   },
 
   pointsApi: {

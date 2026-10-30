@@ -17,6 +17,7 @@ import type {
   AdminLoginResult,
   AdminLogisticsCompany,
   AdminNotice,
+  AdminOrderPage,
   AdminOverview,
   AdminPermissionItem,
   AdminPointsLog,
@@ -112,7 +113,7 @@ export const adminApi: AdminApi = {
   },
 
   orderApi: {
-    list: (query = {}) => adminHttp.get<PageResult<Order>>('/orders', paramsOf(query)),
+    list: (query = {}) => adminHttp.get<AdminOrderPage>('/orders', paramsOf(query)),
     detail: (orderNo) => adminHttp.get<Order>(`/orders/${orderNo}`),
     ship: (orderNo, payload) => adminHttp.post<Order>(`/orders/${orderNo}/ship`, payload),
     close: (orderNo, reason) => adminHttp.put<Order>(`/orders/${orderNo}/close`, { reason }),

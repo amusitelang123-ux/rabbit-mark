@@ -13,7 +13,7 @@ import {
   UserAddress,
 } from '../models'
 import { AppError } from '../utils/errors'
-import { ERR, FINANCE_TYPE, INVENTORY_TYPE, ORDER_STATUS } from '../constants'
+import { ERR, FINANCE_TYPE, INVENTORY_TYPE, ORDER_STATUS, ORDER_STATUS_TEXT } from '../constants'
 import { generateNo, round2 } from '../utils/helpers'
 import { syncProductAggregate } from '../utils/productAggregate'
 import { writeOrderLog } from '../utils/orderLog'
@@ -221,7 +221,8 @@ export async function createOrder(userId: number, input: CreateOrderInput) {
 }
 
 export async function listOrders(userId: number, status?: number) {
-  const where: Record<string, unknown> = { userId }
+  // 用户删除订单只做逻辑隐藏，列表默认不返回
+  const where: Record<string, unknown> = { userId, userDeleted: 0 }
   if (status) where.status = status
   const rows = await Order.findAll({ where, include: orderInclude, order: [['id', 'DESC']] })
   return rows.map((o) => toOrderDto(o as unknown as Parameters<typeof toOrderDto>[0]))
@@ -231,6 +232,8 @@ export interface AdminOrderQuery {
   orderNo?: string
   userId?: number
   status?: number
+  /** 仅看用户已催发货的待发货订单 */
+  onlyReminded?: boolean
   startTime?: string
   endTime?: string
   page?: number
@@ -240,6 +243,12 @@ export interface AdminOrderQuery {
 function buildAdminOrderWhere(query: AdminOrderQuery): WhereOptions {
   const conditions: WhereOptions[] = []
   if (query.status) conditions.push({ status: query.status })
+  if (query.onlyReminded) {
+    conditions.push({
+      status: ORDER_STATUS.PAID,
+      remindShipCount: { [Op.gt]: 0 },
+    } as WhereOptions)
+  }
   if (query.userId) conditions.push({ userId: query.userId })
   if (query.orderNo) conditions.push({ orderNo: { [Op.like]: `%${query.orderNo}%` } } as WhereOptions)
   if (query.startTime || query.endTime) {
@@ -251,26 +260,37 @@ function buildAdminOrderWhere(query: AdminOrderQuery): WhereOptions {
   return conditions.length ? { [Op.and]: conditions } : {}
 }
 
+/** 待发货且用户已催发货的订单数：后台列表顶部告警使用 */
+export function countPendingRemindOrders() {
+  return Order.count({
+    where: { status: ORDER_STATUS.PAID, remindShipCount: { [Op.gt]: 0 } },
+  })
+}
+
 /** 管理端订单列表（不限定用户，支持多条件筛选） */
 export async function listAllOrders(query: AdminOrderQuery = {}) {
   const page = Math.max(1, query.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 10))
   const where = buildAdminOrderWhere(query)
 
-  const { rows, count } = await Order.findAndCountAll({
-    where,
-    include: orderInclude,
-    order: [['id', 'DESC']],
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-    distinct: true,
-  })
+  const [{ rows, count }, pendingRemindCount] = await Promise.all([
+    Order.findAndCountAll({
+      where,
+      include: orderInclude,
+      order: [['id', 'DESC']],
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+      distinct: true,
+    }),
+    countPendingRemindOrders(),
+  ])
   return {
     list: rows.map((o) => toOrderDto(o as unknown as Parameters<typeof toOrderDto>[0])),
     page,
     pageSize,
     total: count,
     totalPages: Math.max(1, Math.ceil(count / pageSize)),
+    pendingRemindCount,
   }
 }
 
@@ -436,7 +456,7 @@ export async function updateAdminRemark(orderNo: string, remark: string, operato
 
 export async function getOrder(userId: number, orderNo: string) {
   const order = await Order.findOne({
-    where: { orderNo, userId },
+    where: { orderNo, userId, userDeleted: 0 },
     include: [...orderInclude, { model: OrderLog, as: 'logs', order: [['id', 'ASC']] }],
   })
   if (!order) throw AppError.notFound('订单不存在')
@@ -446,7 +466,7 @@ export async function getOrder(userId: number, orderNo: string) {
 export async function cancelOrder(userId: number, orderNo: string) {
   return sequelize.transaction(async (transaction) => {
     const order = await Order.findOne({
-      where: { orderNo, userId },
+      where: { orderNo, userId, userDeleted: 0 },
       transaction,
       lock: transaction.LOCK.UPDATE,
     })
@@ -471,7 +491,7 @@ export async function cancelOrder(userId: number, orderNo: string) {
 export async function confirmOrder(userId: number, orderNo: string) {
   return sequelize.transaction(async (transaction) => {
     const order = await Order.findOne({
-      where: { orderNo, userId },
+      where: { orderNo, userId, userDeleted: 0 },
       transaction,
       lock: transaction.LOCK.UPDATE,
     })
@@ -496,6 +516,217 @@ export async function confirmOrder(userId: number, orderNo: string) {
 
     return toOrderDto(order as unknown as Parameters<typeof toOrderDto>[0])
   })
+}
+
+/** 提醒发货冷却时间：10 分钟内重复点击只提示、不重复写日志，避免刷单式骚扰 */
+const REMIND_SHIP_COOLDOWN_MS = 10 * 60 * 1000
+
+/**
+ * 提醒发货（U-18）：仅「待发货」订单可提醒。
+ * 冷却期内重复提醒返回 duplicated=true，由前端做友好提示，不视为业务失败。
+ */
+export async function remindShip(userId: number, orderNo: string) {
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({
+      where: { orderNo, userId, userDeleted: 0 },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    })
+    if (!order) throw AppError.notFound('订单不存在')
+    if (order.status !== ORDER_STATUS.PAID) {
+      throw new AppError('当前订单状态不可提醒发货', ERR.ORDER_STATUS_INVALID)
+    }
+
+    const now = new Date()
+    const lastAt = order.lastRemindShipAt ? new Date(order.lastRemindShipAt).getTime() : 0
+    const remain = lastAt + REMIND_SHIP_COOLDOWN_MS - now.getTime()
+
+    if (lastAt && remain > 0) {
+      return {
+        reminded: false,
+        duplicated: true,
+        remindCount: order.remindShipCount,
+        lastRemindAt: formatDate(new Date(lastAt)),
+        cooldownSeconds: Math.ceil(remain / 1000),
+        nextRemindAt: formatDate(new Date(lastAt + REMIND_SHIP_COOLDOWN_MS)),
+      }
+    }
+
+    // 冗余字段便于后台列表直接展示与筛选，同时保留订单日志作为时间轴证据
+    order.remindShipCount += 1
+    order.lastRemindShipAt = now
+    await order.save({ transaction })
+    await writeOrderLog(
+      Number(order.id),
+      'remind_ship',
+      `user:${userId}`,
+      '用户提醒商家尽快发货',
+      transaction,
+    )
+    return {
+      reminded: true,
+      duplicated: false,
+      remindCount: order.remindShipCount,
+      lastRemindAt: formatDate(now),
+      cooldownSeconds: REMIND_SHIP_COOLDOWN_MS / 1000,
+      nextRemindAt: formatDate(new Date(now.getTime() + REMIND_SHIP_COOLDOWN_MS)),
+    }
+  })
+}
+
+/**
+ * 再次购买（U-18）：把订单明细重新加入购物车。
+ * 已下架或库存不足的明细跳过并在结果中返回，全部失效时才报错。
+ */
+export async function rebuyOrder(userId: number, orderNo: string) {
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({
+      where: { orderNo, userId, userDeleted: 0 },
+      include: [{ model: OrderItem, as: 'items' }],
+      transaction,
+    })
+    if (!order) throw AppError.notFound('订单不存在')
+
+    const items = (order.get('items') as OrderItem[] | undefined) ?? []
+    if (!items.length) throw AppError.notFound('订单商品不存在')
+
+    let addedCount = 0
+    const skipped: { productName: string; reason: string }[] = []
+
+    for (const item of items) {
+      const sku = await ProductSku.findByPk(item.skuId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      })
+      const product = sku ? await Product.findByPk(sku.productId, { transaction }) : null
+      if (!sku || !product || product.status !== 1 || sku.status !== 1) {
+        skipped.push({ productName: item.productName, reason: '商品已下架' })
+        continue
+      }
+
+      const quantity = Math.max(1, item.quantity)
+      if (sku.stock < quantity) {
+        skipped.push({ productName: item.productName, reason: '库存不足' })
+        continue
+      }
+
+      const existing = await Cart.findOne({
+        where: { userId, skuId: sku.id },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      })
+      if (existing) {
+        existing.quantity += quantity
+        existing.selected = 1
+        await existing.save({ transaction })
+      } else {
+        await Cart.create(
+          {
+            userId,
+            productId: Number(sku.productId),
+            skuId: Number(sku.id),
+            quantity,
+            selected: 1,
+          },
+          { transaction },
+        )
+      }
+      addedCount += 1
+    }
+
+    if (!addedCount) {
+      const detail = skipped
+        .slice(0, 3)
+        .map((s) => `「${s.productName}」${s.reason}`)
+        .join('、')
+      throw new AppError(
+        detail ? `${detail}，无法再次购买` : '订单商品已失效，无法再次购买',
+        ERR.PRODUCT_OFF_SHELF,
+      )
+    }
+
+    const cartCount = await Cart.count({ where: { userId }, transaction })
+    await writeOrderLog(
+      Number(order.id),
+      'rebuy',
+      `user:${userId}`,
+      `再次购买：${addedCount} 件商品已加入购物车`,
+      transaction,
+    )
+
+    return {
+      orderNo: order.orderNo,
+      addedCount,
+      skippedCount: skipped.length,
+      skipped,
+      cartCount,
+    }
+  })
+}
+
+/** 用户可删除的订单状态：终态订单才允许从个人订单列表隐藏 */
+const DELETABLE_ORDER_STATUS: number[] = [
+  ORDER_STATUS.FINISHED,
+  ORDER_STATUS.REFUNDED,
+  ORDER_STATUS.CLOSED,
+]
+
+/**
+ * 删除订单（U-18）：按企划 4.1「订单类不删除只置状态」做逻辑隐藏，
+ * 不物理删除，后台订单管理、财务对账与订单日志均保留完整记录。
+ * 用户侧列表/详情/物流/再次购买/待评价等入口统一按 userDeleted=0 过滤。
+ */
+export async function deleteOrder(userId: number, orderNo: string) {
+  return sequelize.transaction(async (transaction) => {
+    const order = await Order.findOne({
+      where: { orderNo, userId, userDeleted: 0 },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    })
+    if (!order) throw AppError.notFound('订单不存在')
+    if (!DELETABLE_ORDER_STATUS.includes(order.status)) {
+      throw new AppError('当前订单状态不可删除', ERR.ORDER_STATUS_INVALID)
+    }
+
+    order.userDeleted = 1
+    order.userDeletedAt = new Date()
+    await order.save({ transaction })
+    await writeOrderLog(
+      Number(order.id),
+      'delete',
+      `user:${userId}`,
+      '用户删除订单（仅隐藏，交易记录保留）',
+      transaction,
+    )
+    return { orderNo: order.orderNo, deleted: true }
+  })
+}
+
+/**
+ * 查看物流（U-19）：返回订单物流公司与轨迹。
+ * 未发货或物流信息缺失时返回空字段，由前端展示空状态，不阻断详情页。
+ */
+export async function getOrderLogistics(userId: number, orderNo: string) {
+  const order = await Order.findOne({
+    where: { orderNo, userId, userDeleted: 0 },
+    include: [{ model: OrderLogistics, as: 'logistics' }],
+  })
+  if (!order) throw AppError.notFound('订单不存在')
+
+  const logistics = order.get('logistics') as OrderLogistics | null
+  const traces = logistics?.traces ?? []
+  return {
+    orderNo: order.orderNo,
+    status: order.status,
+    statusText: ORDER_STATUS_TEXT[order.status] ?? '',
+    company: logistics?.company ?? '',
+    trackingNo: logistics?.trackingNo ?? '',
+    shipTime: order.shipTime ? formatDate(order.shipTime) : null,
+    traces,
+    hasLogistics: Boolean(
+      logistics && (logistics.company || logistics.trackingNo || traces.length),
+    ),
+  }
 }
 
 /**

@@ -564,7 +564,8 @@ function buildOrders(products, skus, users) {
         quantity: it.quantity,
         subtotal: it.subtotal.toFixed(2),
         discount_amount: '0.00',
-        is_commented: status === 40 ? 1 : 0,
+        // 保留部分已完成订单未评价，便于演示「评价晒单」与个人中心「待评价」
+        is_commented: status === 40 && i % 3 !== 0 ? 1 : 0,
         refund_status: 0,
         created_at: createdAt,
         updated_at: createdAt,

@@ -142,6 +142,8 @@ npm run dev:admin    # 后台管理端 → http://localhost:5174/admin/login
 | 用户端 | `user1` ~ `user20` | `123456` |
 | 后台 API | `admin` | `admin123` |
 
+> 订单操作演示：`user2`（待发货 → 提醒发货）、`user3`（待收货 → 查看物流）、`user4`（已完成 → 评价晒单，种子数据保留了一个待评价订单）、`user1`（已取消 → 再次购买 / 删除订单）。
+
 ## 纯前端调试（无需后端 / MySQL）
 
 把 `web/.env.development` 改为：
@@ -213,9 +215,14 @@ VITE_USE_MOCK=true
 | 商品 | `GET /api/client/v1/products`、`/products/:id`、`/products/:id/comments`、`/products/:id/recommend` |
 | 购物车 | `GET/POST /api/client/v1/cart`、`PUT /cart/:id`、`PUT /cart/select-all`、`DELETE /cart` |
 | 用户 | `GET/PUT /api/client/v1/user/profile`、`/user/addresses`、`/user/favorites`、`/user/footprints`、`/user/coupons` |
-| 订单 | `POST/GET /api/client/v1/orders`、`GET /orders/:orderNo`、`PUT /orders/:orderNo/cancel` `/confirm` |
+| 订单 | `POST/GET /api/client/v1/orders`、`GET /orders/:orderNo`、`PUT /orders/:orderNo/cancel` `/confirm`、`GET /orders/:orderNo/logistics`、`POST /orders/:orderNo/rebuy` `/remind-ship`、`DELETE /orders/:orderNo` |
+| 评价 | `GET /api/client/v1/user/comments`、`POST /comments`、`POST /comments/images`（晒单图上传） |
 | 优惠券 | `GET /api/client/v1/coupons/center`、`POST /coupons/:id/receive` |
 | 公告 | `GET /api/client/v1/notices`、`/notices/:id` |
+
+> 订单删除遵循企划 4.1「订单类不删除只置状态」：`DELETE /orders/:orderNo` 仅置 `orders.user_deleted=1` 做用户侧隐藏，订单、支付与财务记录全部保留，后台订单管理仍可查询。
+>
+> 用户「提醒发货」会累加 `orders.remind_ship_count` 并记录 `last_remind_ship_at`；后台订单列表顶部展示催发货告警，支持 `onlyReminded=1` 筛选，订单详情展示催发货次数与最近提醒时间。
 
 数据库设计详见 `server/database/sql/xtx_mall.schema.sql`。
 

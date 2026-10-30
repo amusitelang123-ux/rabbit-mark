@@ -22,6 +22,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
       orderNo: req.query.orderNo ? String(req.query.orderNo) : undefined,
       userId: req.query.userId ? toInt(req.query.userId, 0) : undefined,
       status: req.query.status ? toInt(req.query.status, 0) : undefined,
+      onlyReminded: req.query.onlyReminded === 'true' || req.query.onlyReminded === '1',
       startTime: req.query.startTime ? String(req.query.startTime) : undefined,
       endTime: req.query.endTime ? String(req.query.endTime) : undefined,
       page: toInt(req.query.page, 1),
@@ -83,6 +84,7 @@ export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
     orderNo: req.query.orderNo ? String(req.query.orderNo) : undefined,
     userId: req.query.userId ? toInt(req.query.userId, 0) : undefined,
     status: req.query.status ? toInt(req.query.status, 0) : undefined,
+    onlyReminded: req.query.onlyReminded === 'true' || req.query.onlyReminded === '1',
     startTime: req.query.startTime ? String(req.query.startTime) : undefined,
     endTime: req.query.endTime ? String(req.query.endTime) : undefined,
   })

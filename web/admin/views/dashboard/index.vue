@@ -29,6 +29,7 @@ let pieChart: ChartInstance | null = null
 const cards = [
   { key: 'gmv', label: '累计 GMV', unit: '元', color: '#fe7c00' },
   { key: 'orderCount', label: '订单总数', unit: '单', color: '#409eff' },
+  { key: 'pendingRemindCount', label: '待催发货', unit: '单', color: '#f56c6c' },
   { key: 'userCount', label: '用户总数', unit: '人', color: '#67c23a' },
   { key: 'productCount', label: '在售商品', unit: '件', color: '#e6a23c' },
   { key: 'avgOrderAmount', label: '客单价', unit: '元', color: '#909399' },

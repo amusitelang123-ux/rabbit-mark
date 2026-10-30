@@ -14,11 +14,13 @@ const admin = useAdminStore()
 const loading = ref(false)
 const list = ref<Order[]>([])
 const total = ref(0)
+const pendingRemindCount = ref(0)
 const dateRange = ref<[string, string] | null>(null)
 
 const query = reactive({
   orderNo: '',
   status: undefined as number | undefined,
+  onlyReminded: false,
   page: 1,
   pageSize: 10,
 })
@@ -96,6 +98,7 @@ async function load() {
     const res = await adminApi.orderApi.list({
       orderNo: query.orderNo || undefined,
       status: query.status,
+      onlyReminded: query.onlyReminded || undefined,
       startTime: dateRange.value?.[0],
       endTime: dateRange.value?.[1],
       page: query.page,
@@ -103,6 +106,7 @@ async function load() {
     })
     list.value = res.list
     total.value = res.total
+    pendingRemindCount.value = res.pendingRemindCount
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败')
   } finally {
@@ -118,7 +122,20 @@ function search() {
 function reset() {
   query.orderNo = ''
   query.status = undefined
+  query.onlyReminded = false
   dateRange.value = null
+  search()
+}
+
+/** 顶部催发货告警：一键筛出被用户催发货的待发货订单 */
+function viewReminded() {
+  query.onlyReminded = true
+  query.status = 20
+  search()
+}
+
+function onRemindFilterChange(value: string | number | boolean) {
+  if (value) query.status = 20
   search()
 }
 
@@ -186,6 +203,20 @@ onMounted(async () => {
 
 <template>
   <div>
+    <el-alert
+      v-if="pendingRemindCount > 0"
+      type="warning"
+      effect="light"
+      show-icon
+      :closable="false"
+      class="remind-alert"
+    >
+      <template #title>
+        有 <b>{{ pendingRemindCount }}</b> 笔待发货订单收到用户催发货提醒，请及时处理。
+        <el-button link type="primary" @click="viewReminded">查看催发货订单</el-button>
+      </template>
+    </el-alert>
+
     <el-card shadow="never" class="toolbar">
       <el-form :inline="true" @submit.prevent="search">
         <el-form-item label="订单号">
@@ -195,6 +226,9 @@ onMounted(async () => {
           <el-select v-model="query.status" placeholder="全部" clearable style="width: 130px">
             <el-option v-for="(label, value) in ORDER_STATUS_TEXT" :key="value" :label="label" :value="Number(value)" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="催发货">
+          <el-checkbox v-model="query.onlyReminded" @change="onRemindFilterChange">仅看催发货</el-checkbox>
         </el-form-item>
         <el-form-item label="下单时间">
           <el-date-picker
@@ -239,6 +273,18 @@ onMounted(async () => {
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)">{{ ORDER_STATUS_TEXT[row.status as 10] }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="催发货" width="120">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.status === 20 && row.remindShipCount > 0"
+              :content="`最近提醒：${row.lastRemindShipAt || '—'}`"
+              placement="top"
+            >
+              <el-tag type="danger" effect="dark">催发货 ×{{ row.remindShipCount }}</el-tag>
+            </el-tooltip>
+            <span v-else class="muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
@@ -336,6 +382,9 @@ onMounted(async () => {
 .toolbar {
   margin-bottom: 16px;
 }
+.remind-alert {
+  margin-bottom: 12px;
+}
 .pager {
   display: flex;
   justify-content: flex-end;
@@ -345,5 +394,9 @@ onMounted(async () => {
   font-size: 12px;
   color: #9aa3af;
   margin-bottom: 10px;
+}
+.muted {
+  color: #9aa3af;
+  font-size: 13px;
 }
 </style>

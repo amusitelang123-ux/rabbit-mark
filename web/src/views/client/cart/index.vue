@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useMock } from '@/api'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
@@ -13,10 +14,24 @@ const router = useRouter()
 const cart = useCartStore()
 const user = useUserStore()
 const ui = useUiStore()
+const loading = ref(false)
 
 const freight = computed(() => (cart.selectedTotal >= 99 || cart.selectedTotal === 0 ? 0 : 8))
 const payable = computed(() => cart.selectedTotal + freight.value)
 const freeGap = computed(() => Math.max(0, 99 - cart.selectedTotal))
+
+onMounted(async () => {
+  // 未登录时不请求服务端购物车（Mock 模式数据来自 localStorage，可继续读取）
+  if (!useMock && !user.isLoggedIn) return
+  loading.value = true
+  try {
+    await cart.load()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '购物车加载失败', 'error')
+  } finally {
+    loading.value = false
+  }
+})
 
 function removeItem(skuId: number) {
   cart.remove([skuId])
@@ -146,6 +161,8 @@ function checkout() {
         </div>
       </template>
 
+      <div v-else-if="loading" class="cart-loading">正在加载购物车…</div>
+
       <EmptyState v-else icon="🛒" title="购物车还是空的" desc="快去挑选心仪的好物吧">
         <router-link to="/" class="btn btn-primary">去逛逛</router-link>
       </EmptyState>
@@ -154,6 +171,11 @@ function checkout() {
 </template>
 
 <style scoped>
+.cart-loading {
+  text-align: center;
+  padding: 100px;
+  color: var(--text-secondary);
+}
 .cart-layout {
   display: grid;
   grid-template-columns: 1fr 320px;

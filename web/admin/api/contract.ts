@@ -15,6 +15,7 @@ import type {
   AdminLoginResult,
   AdminLogisticsCompany,
   AdminNotice,
+  AdminOrderPage,
   AdminOrderQuery,
   AdminOverview,
   AdminPermissionItem,
@@ -151,7 +152,7 @@ export interface AdminApi {
     remove(id: number): Promise<void>
   }
   orderApi: {
-    list(query?: AdminOrderQuery): Promise<PageResult<Order>>
+    list(query?: AdminOrderQuery): Promise<AdminOrderPage>
     detail(orderNo: string): Promise<Order>
     ship(
       orderNo: string,

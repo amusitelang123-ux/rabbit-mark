@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { addressApi, commentApi, couponApi, pointsApi, refundApi, userApi } from '@/api'
-import type { Address, Coupon, MyComments, MyPoints, Product, Refund } from '@/api/types'
+import type { Address, Coupon, MyComments, MyPoints, PendingComment, Product, Refund } from '@/api/types'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
 import { useAddressStore } from '@/stores/address'
 import ProductCard from '@/components/ProductCard.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import AddressFormModal from '@/components/AddressFormModal.vue'
+import CommentDialog from '@/views/client/order/components/CommentDialog.vue'
 import { formatMoney } from '@/utils/money'
 
 const user = useUserStore()
@@ -64,42 +65,15 @@ async function signIn() {
 
 /* 发布评价 */
 const commentModal = ref(false)
-const commentTarget = ref<{ orderItemId: number; productName: string } | null>(null)
-const commentScore = ref(5)
-const commentContent = ref('')
-const commentAnonymous = ref(false)
-const commentSubmitting = ref(false)
+const commentTarget = ref<PendingComment | null>(null)
 
-function openComment(item: { orderItemId: number; productName: string }) {
+function openComment(item: PendingComment) {
   commentTarget.value = item
-  commentScore.value = 5
-  commentContent.value = ''
-  commentAnonymous.value = false
   commentModal.value = true
 }
 
-async function submitComment() {
-  if (!commentTarget.value) return
-  if (!commentContent.value.trim()) {
-    ui.toast('请填写评价内容', 'error')
-    return
-  }
-  commentSubmitting.value = true
-  try {
-    await commentApi.create({
-      orderItemId: commentTarget.value.orderItemId,
-      score: commentScore.value,
-      content: commentContent.value.trim(),
-      isAnonymous: commentAnonymous.value,
-    })
-    ui.toast('评价发布成功')
-    commentModal.value = false
-    myComments.value = await commentApi.mine()
-  } catch (e) {
-    ui.toast(e instanceof Error ? e.message : '发布失败', 'error')
-  } finally {
-    commentSubmitting.value = false
-  }
+async function onCommentSubmitted() {
+  myComments.value = await commentApi.mine()
 }
 
 /* 修改密码 */
@@ -539,40 +513,14 @@ function couponLabel(c: Coupon): string {
       @updated="onAddressUpdated"
     />
 
-    <div v-if="commentModal" class="cm-mask" @click.self="commentModal = false">
-      <div class="cm-modal card">
-        <h2 class="cm-modal__title">发表评价</h2>
-        <p class="muted">{{ commentTarget?.productName }}</p>
-
-        <p class="cm-modal__label">评分</p>
-        <div class="cm-stars-input">
-          <button
-            v-for="s in [1, 2, 3, 4, 5]"
-            :key="s"
-            class="cm-star"
-            :class="{ 'is-on': s <= commentScore }"
-            @click="commentScore = s"
-          >
-            ★
-          </button>
-        </div>
-
-        <p class="cm-modal__label">评价内容</p>
-        <textarea v-model="commentContent" class="cm-textarea" rows="4" placeholder="分享你的使用体验吧" />
-
-        <label class="cm-anon">
-          <input v-model="commentAnonymous" type="checkbox" />
-          匿名评价
-        </label>
-
-        <div class="cm-modal__actions">
-          <button class="btn btn-secondary" @click="commentModal = false">取消</button>
-          <button class="btn btn-primary" :disabled="commentSubmitting" @click="submitComment">
-            {{ commentSubmitting ? '提交中…' : '发布评价' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <CommentDialog
+      v-model="commentModal"
+      :order-item-id="commentTarget?.orderItemId ?? 0"
+      :product-name="commentTarget?.productName ?? ''"
+      :product-image="commentTarget?.productImage ?? ''"
+      :order-no="commentTarget?.orderNo ?? ''"
+      @submitted="onCommentSubmitted"
+    />
   </div>
 </template>
 
@@ -965,76 +913,6 @@ function couponLabel(c: Coupon): string {
   border-color: var(--amz-orange);
 }
 .sec-card > .btn {
-  margin-top: 20px;
-}
-
-.cm-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 16px;
-}
-.cm-modal {
-  width: 100%;
-  max-width: 440px;
-  padding: 22px;
-}
-.cm-modal__title {
-  font-size: 19px;
-  font-weight: 800;
-  margin-bottom: 6px;
-}
-.cm-modal__label {
-  font-size: 14px;
-  font-weight: 700;
-  margin: 16px 0 8px;
-}
-.cm-stars-input {
-  display: flex;
-  gap: 6px;
-}
-.cm-star {
-  border: none;
-  background: none;
-  font-size: 26px;
-  line-height: 1;
-  color: var(--border);
-  cursor: pointer;
-  padding: 0;
-}
-.cm-star.is-on {
-  color: var(--amz-orange);
-}
-.cm-textarea {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 14px;
-  font-family: inherit;
-  resize: vertical;
-  outline: none;
-}
-.cm-textarea:focus {
-  border-color: var(--amz-orange);
-}
-.cm-anon {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  margin-top: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.cm-modal__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
   margin-top: 20px;
 }
 

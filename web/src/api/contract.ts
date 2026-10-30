@@ -7,12 +7,16 @@ import type {
   CommentItem,
   Coupon,
   CouponPreviewResult,
+  DeleteOrderResult,
   Order,
+  OrderLogisticsDetail,
   PageResult,
   PayChannel,
   PayStatusResult,
   PrepayResult,
   Product,
+  RebuyResult,
+  RemindShipResult,
   MyComment,
   MyComments,
   MyPoints,
@@ -132,6 +136,14 @@ export interface ClientApi {
     create(payload?: CreateOrderPayload): Promise<Order>
     cancel(orderNo: string): Promise<Order>
     confirm(orderNo: string): Promise<Order>
+    /** 再次购买：把订单明细重新加入购物车 */
+    rebuy(orderNo: string): Promise<RebuyResult>
+    /** 删除订单：用户侧逻辑隐藏，后台与财务记录保留 */
+    remove(orderNo: string): Promise<DeleteOrderResult>
+    /** 提醒发货：仅待发货订单可提醒，10 分钟内重复提醒返回 duplicated */
+    remindShip(orderNo: string): Promise<RemindShipResult>
+    /** 查看物流：公司、运单号与轨迹时间轴 */
+    logistics(orderNo: string): Promise<OrderLogisticsDetail>
   }
   addressApi: {
     list(): Promise<Address[]>
@@ -177,6 +189,8 @@ export interface ClientApi {
   commentApi: {
     mine(): Promise<MyComments>
     create(payload: CreateCommentPayload): Promise<MyComment>
+    /** 评价晒单图片上传（单张，最大 5MB），返回可访问 URL */
+    uploadImage(file: File): Promise<{ url: string }>
   }
   pointsApi: {
     mine(): Promise<MyPoints>

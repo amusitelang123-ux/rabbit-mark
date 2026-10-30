@@ -1,4 +1,4 @@
-import type { Order } from '@/api/types'
+import type { Order, PageResult } from '@/api/types'
 
 export interface AdminProfile {
   id: number
@@ -27,6 +27,8 @@ export interface AdminOverview {
   userCount: number
   productCount: number
   avgOrderAmount: number
+  /** 待发货且用户已催发货的订单数 */
+  pendingRemindCount: number
 }
 
 export interface AdminSku {
@@ -162,10 +164,17 @@ export interface AdminOrderQuery {
   orderNo?: string
   userId?: number
   status?: number
+  /** 仅看用户已催发货的待发货订单 */
+  onlyReminded?: boolean
   startTime?: string
   endTime?: string
   page?: number
   pageSize?: number
+}
+
+/** 后台订单分页：额外返回待处理催发货订单数，用于列表顶部告警 */
+export interface AdminOrderPage extends PageResult<Order> {
+  pendingRemindCount: number
 }
 
 export interface AdminProductPayload {
