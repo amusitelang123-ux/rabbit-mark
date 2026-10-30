@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import { optionalAuth, requireAuth } from '../../middlewares/auth'
-import { avatarUpload, commentUpload } from '../../middlewares/upload'
+import { avatarUpload, commentUpload, refundUpload } from '../../middlewares/upload'
 import * as auth from '../../controllers/client/authController'
 import * as catalog from '../../controllers/client/catalogController'
 import * as user from '../../controllers/client/userController'
 import * as cart from '../../controllers/client/cartController'
 import * as order from '../../controllers/client/orderController'
 import * as payment from '../../controllers/client/paymentController'
+import * as wallet from '../../controllers/client/walletController'
 import * as refund from '../../controllers/client/refundController'
 import * as comment from '../../controllers/client/commentController'
 import * as points from '../../controllers/client/pointsController'
@@ -39,6 +40,8 @@ router.get('/products/:id/recommend', catalog.recommend)
 router.get('/user/profile', requireAuth, user.profile)
 router.put('/user/profile', requireAuth, user.updateProfile)
 router.put('/user/password', requireAuth, user.changePassword)
+router.put('/user/pay-password', requireAuth, user.setPayPassword)
+router.get('/user/login-logs', requireAuth, user.loginLogs)
 router.post('/user/avatar', requireAuth, avatarUpload.single('file'), user.uploadAvatar)
 router.get('/user/addresses', requireAuth, user.addresses)
 router.post('/user/addresses', requireAuth, user.createAddress)
@@ -47,6 +50,11 @@ router.delete('/user/addresses/:id', requireAuth, user.deleteAddress)
 router.get('/user/favorites', requireAuth, user.favorites)
 router.post('/user/favorites/toggle', requireAuth, user.toggleFavorite)
 router.get('/user/footprints', requireAuth, user.footprints)
+
+/* 钱包与余额充值（U-30） */
+router.get('/user/wallet', requireAuth, wallet.mine)
+router.post('/user/wallet/recharges', requireAuth, wallet.createRecharge)
+router.get('/user/wallet/recharges/:payNo', requireAuth, wallet.rechargeStatus)
 
 /* 购物车 */
 router.get('/cart', requireAuth, cart.list)
@@ -69,11 +77,13 @@ router.delete('/orders/:orderNo', requireAuth, order.remove)
 /* 支付 */
 router.post('/payments/prepay', requireAuth, payment.prepay)
 router.post('/payments/callback/:channel', payment.callback)
+router.post('/payments/recharge/callback/:channel', wallet.rechargeCallback)
 router.get('/payments/:payNo/status', requireAuth, payment.status)
 
 /* 售后 */
 router.post('/refunds', requireAuth, refund.apply)
 router.get('/refunds', requireAuth, refund.mine)
+router.post('/refunds/images', requireAuth, refundUpload.single('file'), refund.uploadImage)
 
 /* 评价 */
 router.get('/user/comments', requireAuth, comment.mine)

@@ -43,6 +43,22 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   sendOk(res, await userService.changePassword(req.auth!.uid, input), '密码已修改')
 })
 
+const payPasswordSchema = z.object({
+  password: z.string().regex(/^\d{6}$/, '支付密码必须为 6 位数字'),
+  oldPassword: z.string().optional(),
+})
+
+/** 设置/修改支付密码（U-45，预留能力） */
+export const setPayPassword = asyncHandler(async (req: Request, res: Response) => {
+  const input = payPasswordSchema.parse(req.body)
+  sendOk(res, await userService.setPayPassword(req.auth!.uid, input), '支付密码已保存')
+})
+
+/** 登录设备记录（U-45） */
+export const loginLogs = asyncHandler(async (req: Request, res: Response) => {
+  sendOk(res, await userService.listLoginLogs(req.auth!.uid))
+})
+
 export const uploadAvatar = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw new AppError('请选择要上传的图片')
   const url = toUploadUrl('avatars', req.file.filename)

@@ -104,18 +104,49 @@ export async function me(adminId: number) {
 
 /* --------------------------------- 概览 ----------------------------------- */
 
-export async function overview() {
+export type StatsRange = 'today' | 'yesterday' | '7d' | '30d' | 'all'
+
+/** 概览统计区间：今日 / 昨日 / 近 7 天 / 近 30 天 / 累计 */
+function rangeBounds(range: StatsRange): { start?: Date; end?: Date } {
+  if (range === 'all') return {}
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  if (range === 'today') return { start: today }
+  if (range === 'yesterday') {
+    const start = new Date(today)
+    start.setDate(start.getDate() - 1)
+    return { start, end: today }
+  }
+  const start = new Date(today)
+  start.setDate(start.getDate() - (range === '7d' ? 6 : 29))
+  return { start }
+}
+
+export async function overview(range: StatsRange = 'all') {
   const paidStatuses = [ORDER_STATUS.PAID, ORDER_STATUS.SHIPPED, ORDER_STATUS.FINISHED]
-  const [orderCount, paidOrderCount, gmvRow, userCount, productCount, pendingRemindCount] =
+  const { start, end } = rangeBounds(range)
+  const timeWindow =
+    start || end
+      ? {
+          createdAt: {
+            ...(start ? { [Op.gte]: start } : {}),
+            ...(end ? { [Op.lt]: end } : {}),
+          },
+        }
+      : {}
+  const paidWhere = { status: paidStatuses, ...timeWindow }
+
+  const [orderCount, paidOrderCount, gmvRow, userCount, newUsers, productCount, pendingRemindCount] =
     await Promise.all([
-      Order.count(),
-      Order.count({ where: { status: paidStatuses } }),
+      Order.count({ where: timeWindow }),
+      Order.count({ where: paidWhere }),
       Order.findOne({
-        where: { status: paidStatuses },
+        where: paidWhere,
         attributes: [[fn('SUM', col('pay_amount')), 'gmv']],
         raw: true,
       }),
       User.count(),
+      User.count({ where: timeWindow }),
       Product.count({ where: { status: 1 } }),
       // 待发货且用户已催发货的订单，后台首页与订单列表用于醒目提醒
       Order.count({
@@ -124,9 +155,12 @@ export async function overview() {
     ])
   const gmv = Number((gmvRow as unknown as { gmv: string | null } | null)?.gmv ?? 0)
   return {
+    range,
     orderCount,
+    paidOrderCount,
     gmv,
     userCount,
+    newUsers,
     productCount,
     pendingRemindCount,
     // 客单价 = GMV ÷ 已支付口径订单数（20 已付款 / 30 已发货 / 40 已完成）；

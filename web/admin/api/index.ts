@@ -11,6 +11,7 @@ import type {
   AdminFaq,
   AdminFeedback,
   AdminFreightTemplate,
+  AdminHomeFloor,
   AdminInvoice,
   AdminLevel,
   AdminLogItem,
@@ -29,12 +30,17 @@ import type {
   AdminSeckill,
   AdminSetting,
   AdminSku,
+  AdminTag,
   AdminUserDetail,
   AdminUserItem,
   CategorySalesItem,
+  DailyStatItem,
   FinanceRecordItem,
+  FinanceReport,
   InventoryLogItem,
+  MarketingActivityStats,
   Order,
+  OrderStatusStat,
   ProductRankItem,
   ProductImportResult,
   Reconciliation,
@@ -59,12 +65,16 @@ export const adminApi: AdminApi = {
   },
 
   statsApi: {
-    overview: () => adminHttp.get<AdminOverview>('/stats/overview'),
+    overview: (range = 'all') => adminHttp.get<AdminOverview>('/stats/overview', { range }),
     salesTrend: (days = 30) => adminHttp.get<SalesTrendPoint[]>('/stats/sales-trend', { days }),
+    daily: (days = 30) => adminHttp.get<DailyStatItem[]>('/stats/daily', { days }),
     productRank: (sortBy = 'sales', limit = 10) =>
       adminHttp.get<ProductRankItem[]>('/stats/product-rank', { sortBy, limit }),
     categorySales: () => adminHttp.get<CategorySalesItem[]>('/stats/category-sales'),
     userAnalysis: (days = 30) => adminHttp.get<UserAnalysis>('/stats/user-analysis', { days }),
+    orderStatus: () => adminHttp.get<OrderStatusStat[]>('/stats/order-status'),
+    marketing: () => adminHttp.get<MarketingActivityStats>('/stats/marketing'),
+    export: (type) => adminDownload('/stats/export', { type }, `stats-${type}-${Date.now()}.csv`),
   },
 
   productApi: {
@@ -119,6 +129,12 @@ export const adminApi: AdminApi = {
     close: (orderNo, reason) => adminHttp.put<Order>(`/orders/${orderNo}/close`, { reason }),
     remark: (orderNo, remark) =>
       adminHttp.put<{ orderNo: string; adminRemark: string }>(`/orders/${orderNo}/remark`, { remark }),
+    updateShipping: (orderNo, payload) => adminHttp.put<Order>(`/orders/${orderNo}/logistics`, payload),
+    markAbnormal: (orderNo, payload) =>
+      adminHttp.put<{ orderNo: string; isAbnormal: boolean; abnormalReason: string }>(
+        `/orders/${orderNo}/abnormal`,
+        payload,
+      ),
     export: (query = {}) => adminDownload('/orders/export', paramsOf(query), `orders-${Date.now()}.csv`),
     batchShip: (orders) =>
       adminHttp.post<{ succeeded: number; failed: { orderNo: string; reason: string }[] }>(
@@ -172,11 +188,23 @@ export const adminApi: AdminApi = {
       adminHttp.get<PageResult<AdminPointsLog> & { balance: number }>(`/users/${id}/points`, { page, pageSize }),
     adjustPoints: (id, change, remark) =>
       adminHttp.post<{ balance: number; change: number }>(`/users/${id}/points`, { change, remark }),
+    setTags: (id, tagIds) =>
+      adminHttp.put<{ userId: number; tagIds: number[] }>(`/users/${id}/tags`, { tagIds }),
+    adjustBalance: (id, change) =>
+      adminHttp.put<{ id: number; balance: number }>(`/users/${id}/balance`, { change }),
+  },
+
+  tagApi: {
+    list: () => adminHttp.get<AdminTag[]>('/user-tags'),
+    create: (name) => adminHttp.post<AdminTag>('/user-tags', { name }),
+    update: (id, name) => adminHttp.put<{ id: number; name: string }>(`/user-tags/${id}`, { name }),
+    remove: (id) => adminHttp.delete<void>(`/user-tags/${id}`),
   },
 
   refundApi: {
     list: (query = {}) => adminHttp.get<PageResult<AdminRefund>>('/refunds', paramsOf(query)),
     audit: (id, payload) => adminHttp.put<AdminRefund>(`/refunds/${id}/audit`, payload),
+    receive: (id, remark) => adminHttp.put<AdminRefund>(`/refunds/${id}/receive`, { remark }),
   },
 
   marketingApi: {
@@ -201,6 +229,13 @@ export const adminApi: AdminApi = {
     createPromotion: (payload) => adminHttp.post<AdminPromotion>('/promotions', payload),
     updatePromotion: (id, payload) => adminHttp.put<AdminPromotion>(`/promotions/${id}`, payload),
     removePromotion: (id) => adminHttp.delete<void>(`/promotions/${id}`),
+  },
+
+  homeFloorApi: {
+    list: () => adminHttp.get<AdminHomeFloor[]>('/home-floors'),
+    create: (payload) => adminHttp.post<{ id: number }>('/home-floors', payload),
+    update: (id, payload) => adminHttp.put<{ id: number }>(`/home-floors/${id}`, payload),
+    remove: (id) => adminHttp.delete<void>(`/home-floors/${id}`),
   },
 
   commentApi: {
@@ -241,6 +276,7 @@ export const adminApi: AdminApi = {
       adminHttp.get<PageResult<AdminInvoice>>('/finance/invoices', { page, pageSize }),
     setInvoiceStatus: (id, status) =>
       adminHttp.put<{ id: number; status: number }>(`/finance/invoices/${id}`, { status }),
+    report: (year) => adminHttp.get<FinanceReport>('/finance/report', { year }),
   },
 }
 

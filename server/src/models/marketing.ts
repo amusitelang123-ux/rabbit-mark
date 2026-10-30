@@ -25,6 +25,8 @@ export class Coupon extends Model<InferAttributes<Coupon>, InferCreationAttribut
   declare scope: CreationOptional<number>
   declare scopeIds: number[] | null
   declare status: CreationOptional<number>
+  /** 新人券：注册成功后自动发放 */
+  declare isNewUser: CreationOptional<number>
   declare createdAt: CreationOptional<Date>
   declare updatedAt: CreationOptional<Date>
 }
@@ -48,6 +50,7 @@ Coupon.init(
     scope: { type: DataTypes.TINYINT, defaultValue: 1 },
     scopeIds: { type: DataTypes.JSON, allowNull: true },
     status: { type: DataTypes.TINYINT, defaultValue: 1 },
+    isNewUser: { type: DataTypes.TINYINT, defaultValue: 0 },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
   },
@@ -143,7 +146,15 @@ export class Promotion extends Model<InferAttributes<Promotion>, InferCreationAt
   declare id: CreationOptional<number>
   declare name: string
   declare type: number
-  declare ruleJson: { thresholds: { amount: number; reduce: number }[] } | { amount: number; gift: string }
+  declare ruleJson: {
+    thresholds: {
+      amount: number
+      reduce?: number
+      giftProductId?: number
+      giftSkuId?: number
+      giftQuantity?: number
+    }[]
+  }
   declare startTime: Date
   declare endTime: Date
   declare status: CreationOptional<number>

@@ -2,6 +2,7 @@ import { createApp } from './app'
 import { connectDatabase } from './config/database'
 import { config } from './config'
 import { startCloseExpiredOrdersJob } from './jobs/closeExpiredOrders'
+import { startStatAggregationJob } from './jobs/aggregateDailyStats'
 
 async function bootstrap() {
   try {
@@ -18,6 +19,7 @@ async function bootstrap() {
   })
 
   startCloseExpiredOrdersJob()
+  startStatAggregationJob()
 }
 
 process.on('unhandledRejection', (reason) => console.error('[unhandledRejection]', reason))

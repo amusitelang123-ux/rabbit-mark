@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { addressApi, couponApi, orderApi, promotionApi, seckillApi } from '@/api'
+import { addressApi, couponApi, orderApi, pointsApi, promotionApi, seckillApi } from '@/api'
 import type { ActivePromotion, ActiveSeckill, Address, CouponPreview } from '@/api/types'
 import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
@@ -25,7 +25,14 @@ const selectedCouponId = ref<number | null>(null)
 const couponOptOut = ref(false)
 const remark = ref('')
 const invoice = ref<'none' | 'normal' | 'special'>('none')
+const invoiceTitle = ref('')
+const invoiceTaxNo = ref('')
+const invoiceEmail = ref('')
 const submitting = ref(false)
+
+/* 积分抵现（U-64）：100 积分 = 1 元，最多抵扣应付金额的 50% */
+const pointsBalance = ref(0)
+const usePoints = ref(false)
 
 const items = computed(() => cart.selectedItems)
 /** 商品原价总额 */
@@ -80,9 +87,31 @@ const matchedPromotion = computed(() =>
   activePromotions.value.find((p) => p.type === 1 && p.thresholds.some((t) => t.amount <= effectiveTotal.value)),
 )
 
-const payAmount = computed(() =>
+/** 满赠预览（U-62）：取满足门槛的最高档位，与服务端「每单一份」口径一致 */
+const matchedGift = computed(() => {
+  let best: { promotion: ActivePromotion; threshold: ActivePromotion['thresholds'][number] } | null = null
+  for (const p of activePromotions.value) {
+    if (p.type !== 2) continue
+    for (const t of p.thresholds) {
+      if (!t.giftSkuId || !(t.giftQuantity ?? 0)) continue
+      if (effectiveTotal.value < t.amount) continue
+      if (!best || t.amount > best.threshold.amount) best = { promotion: p, threshold: t }
+    }
+  }
+  return best
+})
+
+const basePayAmount = computed(() =>
   Math.max(0, addMoney(effectiveTotal.value, freight.value) - couponAmount.value - promotionAmount.value),
 )
+/** 当前订单最多可抵扣的金额（整数元） */
+const maxPointsDeduct = computed(() => {
+  const byPoints = Math.floor(pointsBalance.value / 100)
+  const byRate = Math.floor(basePayAmount.value * 0.5)
+  return Math.max(0, Math.min(byPoints, byRate))
+})
+const pointsDeduct = computed(() => (usePoints.value ? maxPointsDeduct.value : 0))
+const payAmount = computed(() => Math.max(0, basePayAmount.value - pointsDeduct.value))
 
 function couponLabel(c: CouponPreview): string {
   return c.type === 1 ? `满${c.minAmount}减${c.amount}` : `${(c.discountRate * 10).toFixed(1)}折`
@@ -106,12 +135,36 @@ async function submit() {
     return
   }
   if (!items.value.length) return
+  // 发票校验：类型为普票/专票时必须填写抬头，专票必须填写税号
+  if (invoice.value !== 'none' && !invoiceTitle.value.trim()) {
+    ui.toast('请填写发票抬头', 'error')
+    return
+  }
+  if (invoice.value === 'special' && !invoiceTaxNo.value.trim()) {
+    ui.toast('增值税专票必须填写税号', 'error')
+    return
+  }
+  if (invoiceEmail.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceEmail.value)) {
+    ui.toast('发票接收邮箱格式不正确', 'error')
+    return
+  }
   submitting.value = true
   try {
     const order = await orderApi.create({
       addressId: selectedAddressId.value ?? undefined,
       couponId: couponOptOut.value ? 0 : (selectedCouponId.value ?? undefined),
       remark: remark.value || undefined,
+      usePoints: usePoints.value || undefined,
+      invoice:
+        invoice.value === 'none'
+          ? undefined
+          : {
+              type: invoice.value === 'normal' ? 1 : 2,
+              title: invoiceTitle.value.trim(),
+              taxNo: invoiceTaxNo.value.trim() || undefined,
+              email: invoiceEmail.value.trim() || undefined,
+              content: '商品明细',
+            },
     })
     await cart.clearSelected()
     ui.toast(`下单成功，订单号 ${order.orderNo}`)
@@ -130,6 +183,15 @@ onMounted(async () => {
     promotionApi.active().catch(() => []),
     seckillApi.active().catch(() => []),
   ])
+  // 积分余额仅用于抵现预览，加载失败不影响下单
+  pointsApi
+    .mine()
+    .then((p) => {
+      pointsBalance.value = p.balance
+    })
+    .catch(() => {
+      pointsBalance.value = 0
+    })
   addresses.value = addrs
   coupons.value = cps.list
   if (!couponOptOut.value) selectedCouponId.value = cps.bestCouponId
@@ -231,6 +293,20 @@ onMounted(async () => {
                 <button :class="{ 'is-active': invoice === 'special' }" @click="invoice = 'special'">增值税专票</button>
               </div>
             </div>
+            <template v-if="invoice !== 'none'">
+              <div class="field-row">
+                <span>发票抬头</span>
+                <input v-model="invoiceTitle" class="input" placeholder="个人或公司名称" maxlength="100" />
+              </div>
+              <div v-if="invoice === 'special'" class="field-row">
+                <span>税号</span>
+                <input v-model="invoiceTaxNo" class="input" placeholder="纳税人识别号" maxlength="50" />
+              </div>
+              <div class="field-row">
+                <span>接收邮箱</span>
+                <input v-model="invoiceEmail" class="input" placeholder="选填，用于接收电子发票" maxlength="100" />
+              </div>
+            </template>
             <div class="field-row">
               <span>订单备注</span>
               <input v-model="remark" class="input" placeholder="选填，如：请尽快发货" maxlength="100" />
@@ -255,6 +331,20 @@ onMounted(async () => {
           <p v-if="matchedPromotion" class="summary__promo">
             🎉 已参与「{{ matchedPromotion.name }}」，下单自动抵扣
           </p>
+          <p v-if="matchedGift" class="summary__promo">
+            🎁 已参与「{{ matchedGift.promotion.name }}」，赠
+            {{ matchedGift.threshold.giftName || '指定商品' }} ×{{ matchedGift.threshold.giftQuantity }}
+          </p>
+          <label v-if="maxPointsDeduct > 0" class="points-toggle">
+            <input v-model="usePoints" type="checkbox" />
+            <span>
+              使用积分抵现（余额 {{ pointsBalance }} 积分，可抵 ¥{{ maxPointsDeduct }}）
+            </span>
+          </label>
+          <div v-if="pointsDeduct > 0" class="summary__row">
+            <span>积分抵扣</span>
+            <b class="is-minus">-¥{{ formatMoney(pointsDeduct) }}</b>
+          </div>
           <div class="summary__total">
             <span>应付金额</span>
             <PriceTag :amount="payAmount" size="lg" />
@@ -486,6 +576,20 @@ onMounted(async () => {
   background: #fff8ec;
   border-radius: 6px;
   padding: 7px 10px;
+}
+.points-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.points-toggle input {
+  margin-top: 2px;
+  accent-color: var(--amz-orange);
 }
 
 @media (max-width: 1000px) {

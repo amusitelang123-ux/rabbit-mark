@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, RebuyResult, RemindShipResult, UserInfo, Notice } from '../types'
+import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, LoginLogItem, MyComment, MyComments, MyPoints, MyWallet, RechargeStatusResult, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, RebuyResult, RemindShipResult, UserInfo, Notice } from '../types'
 import type {
   AddressPayload,
   CartAddPayload,
@@ -68,7 +68,8 @@ export const realApi: ClientApi = {
   },
 
   orderApi: {
-    list: (status) => http.get<Order[]>('/orders', { status }),
+    list: (status, page = 1, pageSize = 10) =>
+      http.get<PageResult<Order>>('/orders', { status, page, pageSize }),
     detail: (orderNo) => http.get<Order | undefined>(`/orders/${orderNo}`),
     create: (payload: CreateOrderPayload = {}) => http.post<Order>('/orders', payload),
     cancel: (orderNo) => http.put<Order>(`/orders/${orderNo}/cancel`),
@@ -96,11 +97,14 @@ export const realApi: ClientApi = {
       }),
     captcha: () =>
       http.get<{ captchaId: string; image: string; expireIn: number }>('/auth/captcha'),
+    loginBySms: (phone, code) => http.post<LoginResult>('/auth/login', { phone, code }),
     register: (payload: RegisterPayload) => http.post<LoginResult>('/auth/register', payload),
     profile: () => http.get<UserInfo>('/user/profile'),
     updateProfile: (patch: ProfilePatch) => http.put<UserInfo>('/user/profile', patch),
     uploadAvatar: (file: File) => http.upload<UserInfo>('/user/avatar', file),
     changePassword: (payload) => http.put<{ changed: boolean }>('/user/password', payload),
+    setPayPassword: (payload) => http.put<{ hasPayPassword: boolean }>('/user/pay-password', payload),
+    loginLogs: () => http.get<LoginLogItem[]>('/user/login-logs'),
     sendSmsCode: (phone) => http.post<{ phone: string; code: string }>('/auth/sms-code', { phone }),
     resetPassword: (payload) => http.post<{ reset: boolean }>('/auth/reset-password', payload),
     favorites: () => http.get<Product[]>('/user/favorites'),
@@ -119,12 +123,22 @@ export const realApi: ClientApi = {
   paymentApi: {
     prepay: (payload: PrepayPayload) => http.post<PrepayResult>('/payments/prepay', payload),
     status: (payNo) => http.get<PayStatusResult>(`/payments/${payNo}/status`),
-    sandboxPay: (payload: SandboxPayPayload) => http.post<void>('/payments/callback/4', payload),
+    sandboxPay: (payload: SandboxPayPayload) =>
+      http.post<void>(`/payments/callback/${payload.channel ?? 4}`, payload),
+  },
+
+  walletApi: {
+    mine: () => http.get<MyWallet>('/user/wallet'),
+    create: (payload) => http.post<PrepayResult>('/user/wallet/recharges', payload),
+    status: (payNo) => http.get<RechargeStatusResult>(`/user/wallet/recharges/${payNo}`),
+    sandboxPay: (payload: SandboxPayPayload) =>
+      http.post<void>(`/payments/recharge/callback/${payload.channel ?? 4}`, payload),
   },
 
   refundApi: {
     apply: (payload) => http.post<Refund>('/refunds', payload),
     mine: () => http.get<Refund[]>('/refunds'),
+    uploadImage: (file) => http.upload<{ url: string }>('/refunds/images', file),
   },
 
   commentApi: {

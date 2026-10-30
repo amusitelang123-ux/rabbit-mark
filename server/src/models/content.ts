@@ -148,3 +148,50 @@ Feedback.init(
   },
   { sequelize, tableName: 'feedbacks', timestamps: true },
 )
+
+/** 首页推荐楼层（A-44）：人工编排标题、入口分类与选品 */
+export class HomeFloor extends Model<InferAttributes<HomeFloor>, InferCreationAttributes<HomeFloor>> {
+  declare id: CreationOptional<number>
+  declare title: string
+  declare subtitle: string | null
+  declare categoryId: number | null
+  declare sort: CreationOptional<number>
+  declare status: CreationOptional<number>
+  declare createdAt: CreationOptional<Date>
+  declare updatedAt: CreationOptional<Date>
+}
+
+HomeFloor.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    title: { type: DataTypes.STRING(50), allowNull: false },
+    subtitle: { type: DataTypes.STRING(100), allowNull: true },
+    categoryId: { type: DataTypes.INTEGER, allowNull: true },
+    sort: { type: DataTypes.INTEGER, defaultValue: 0 },
+    status: { type: DataTypes.TINYINT, defaultValue: 1 },
+    createdAt: DataTypes.DATE,
+    updatedAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'home_floors', timestamps: true },
+)
+
+/** 楼层选品：sort 决定楼层内商品顺序 */
+export class HomeFloorProduct extends Model<
+  InferAttributes<HomeFloorProduct>,
+  InferCreationAttributes<HomeFloorProduct>
+> {
+  declare id: CreationOptional<number>
+  declare floorId: number
+  declare productId: number
+  declare sort: CreationOptional<number>
+}
+
+HomeFloorProduct.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    floorId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    productId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    sort: { type: DataTypes.INTEGER, defaultValue: 0 },
+  },
+  { sequelize, tableName: 'home_floor_products', timestamps: false },
+)

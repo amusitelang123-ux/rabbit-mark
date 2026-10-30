@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { adminApi } from '@admin/api'
-import type { AdminInvoice, FinanceRecordItem, Reconciliation } from '@admin/api'
+import type { AdminInvoice, FinanceRecordItem, FinanceReport, Reconciliation } from '@admin/api'
 
 const tab = ref('records')
 const loading = ref(false)
@@ -20,6 +20,24 @@ const invoicePage = ref(1)
 const invoicePageSize = 10
 
 const CHANNEL_TEXT: Record<number, string> = { 1: '微信', 2: '支付宝', 3: '余额', 4: '沙箱' }
+
+/* 经营报表（A-64） */
+const report = ref<FinanceReport | null>(null)
+const reportLoading = ref(false)
+const currentYear = new Date().getFullYear()
+const reportYear = ref(currentYear)
+const reportYears = [currentYear - 2, currentYear - 1, currentYear]
+
+async function loadReport() {
+  reportLoading.value = true
+  try {
+    report.value = await adminApi.financeApi.report(reportYear.value)
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '报表加载失败')
+  } finally {
+    reportLoading.value = false
+  }
+}
 
 async function loadRecords() {
   loading.value = true
@@ -69,6 +87,7 @@ onMounted(() => {
   loadRecords()
   loadRecon()
   loadInvoices()
+  loadReport()
 })
 </script>
 
@@ -195,6 +214,77 @@ onMounted(() => {
           />
         </div>
       </el-tab-pane>
+
+      <el-tab-pane label="经营报表" name="report">
+        <div class="pane-head">
+          <el-select v-model="reportYear" style="width: 120px" @change="loadReport">
+            <el-option v-for="y in reportYears" :key="y" :label="`${y} 年`" :value="y" />
+          </el-select>
+          <span class="hint">成本按「订单明细数量 × SKU 当前成本价」估算，未维护成本价按 0 计</span>
+        </div>
+        <div v-loading="reportLoading">
+          <el-row v-if="report" :gutter="16" class="recon-cards">
+            <el-col :xs="12" :sm="8">
+              <div class="recon-card">
+                <span class="recon-card__label">年度收入</span>
+                <b class="recon-card__value is-income">¥{{ report.total.income }}</b>
+              </div>
+            </el-col>
+            <el-col :xs="12" :sm="8">
+              <div class="recon-card">
+                <span class="recon-card__label">年度退款</span>
+                <b class="recon-card__value is-refund">¥{{ report.total.refund }}</b>
+              </div>
+            </el-col>
+            <el-col :xs="12" :sm="8">
+              <div class="recon-card">
+                <span class="recon-card__label">净收入</span>
+                <b class="recon-card__value is-net">¥{{ report.total.net }}</b>
+              </div>
+            </el-col>
+            <el-col :xs="12" :sm="8">
+              <div class="recon-card">
+                <span class="recon-card__label">成本</span>
+                <b class="recon-card__value">¥{{ report.total.cost }}</b>
+              </div>
+            </el-col>
+            <el-col :xs="12" :sm="8">
+              <div class="recon-card">
+                <span class="recon-card__label">毛利</span>
+                <b class="recon-card__value is-income">¥{{ report.total.gross }}</b>
+              </div>
+            </el-col>
+            <el-col :xs="12" :sm="8">
+              <div class="recon-card">
+                <span class="recon-card__label">毛利率</span>
+                <b class="recon-card__value">{{ report.total.grossRate }}%</b>
+              </div>
+            </el-col>
+          </el-row>
+
+          <el-table v-if="report" :data="report.months" stripe>
+            <el-table-column label="月份" prop="month" width="120" />
+            <el-table-column label="收入">
+              <template #default="{ row }"><span class="is-income">¥{{ row.income }}</span></template>
+            </el-table-column>
+            <el-table-column label="退款">
+              <template #default="{ row }"><span class="is-refund">¥{{ row.refund }}</span></template>
+            </el-table-column>
+            <el-table-column label="净收入">
+              <template #default="{ row }"><b>¥{{ row.net }}</b></template>
+            </el-table-column>
+            <el-table-column label="成本">
+              <template #default="{ row }">¥{{ row.cost }}</template>
+            </el-table-column>
+            <el-table-column label="毛利">
+              <template #default="{ row }">¥{{ row.gross }}</template>
+            </el-table-column>
+            <el-table-column label="毛利率">
+              <template #default="{ row }">{{ row.grossRate }}%</template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </el-card>
 </template>
@@ -202,6 +292,11 @@ onMounted(() => {
 <style scoped>
 .pane-head {
   margin-bottom: 14px;
+}
+.hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: #9aa3af;
 }
 .pager {
   display: flex;

@@ -164,7 +164,12 @@ onBeforeUnmount(() => {
             <h2 class="floor__title">{{ floor.title }}</h2>
             <span class="floor__sub">{{ floor.subtitle }}</span>
           </div>
-          <router-link :to="`/category/${floor.categoryId}`" class="link">查看全部 ›</router-link>
+          <router-link
+            :to="floor.categoryId ? `/category/${floor.categoryId}` : '/products'"
+            class="link"
+          >
+            查看全部 ›
+          </router-link>
         </div>
         <div class="grid-products">
           <ProductCard v-for="p in floor.products" :key="p.id" :product="p" />

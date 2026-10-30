@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { brandApi, categoryApi, productApi } from '@/api'
 import type { Brand, Category, Product } from '@/api/types'
 import ProductCard from './ProductCard.vue'
@@ -19,12 +20,19 @@ const total = ref(0)
 const totalPages = ref(1)
 const loading = ref(false)
 
+const route = useRoute()
 const activeTop = ref<number | undefined>(undefined)
+
+/** 支持 /products?brandId=x 直达（商品详情品牌链接、品牌专区） */
+function brandIdFromRoute(): number | undefined {
+  const raw = Number(route.query.brandId)
+  return Number.isFinite(raw) && raw > 0 ? raw : undefined
+}
 
 const query = reactive({
   categoryId: props.categoryId,
   keyword: props.keyword,
-  brandId: undefined as number | undefined,
+  brandId: brandIdFromRoute(),
   minPrice: undefined as number | undefined,
   maxPrice: undefined as number | undefined,
   sortBy: 'default' as 'default' | 'sales' | 'priceAsc' | 'priceDesc' | 'new',
@@ -120,6 +128,16 @@ watch(
   () => props.keyword,
   (kw) => {
     query.keyword = kw
+    query.page = 1
+    fetchList()
+  },
+)
+watch(
+  () => route.query.brandId,
+  () => {
+    const id = brandIdFromRoute()
+    if (id === query.brandId) return
+    query.brandId = id
     query.page = 1
     fetchList()
   },

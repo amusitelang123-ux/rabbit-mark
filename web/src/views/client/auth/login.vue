@@ -17,8 +17,10 @@ const account = ref('')
 const password = ref('')
 const phone = ref('')
 const code = ref('')
+const remember = ref(user.remember)
 const loading = ref(false)
 const countdown = ref(0)
+const sending = ref(false)
 let timer: number | undefined
 
 async function sendCode() {
@@ -26,18 +28,45 @@ async function sendCode() {
     ui.toast('请输入正确的手机号', 'error')
     return
   }
-  countdown.value = 60
-  ui.toast('验证码已发送（演示：8888）')
-  timer = window.setInterval(() => {
-    countdown.value -= 1
-    if (countdown.value <= 0) clearInterval(timer)
-  }, 1000)
+  if (countdown.value > 0 || sending.value) return
+  sending.value = true
+  try {
+    const res = await userApi.sendSmsCode(phone.value)
+    countdown.value = 60
+    // 演示环境后端直接返回验证码，方便评审；生产环境不会回传
+    ui.toast(`验证码已发送（演示：${res.code}）`)
+    timer = window.setInterval(() => {
+      countdown.value -= 1
+      if (countdown.value <= 0) clearInterval(timer)
+    }, 1000)
+  } catch (err) {
+    ui.toast(err instanceof Error ? err.message : '验证码发送失败', 'error')
+  } finally {
+    sending.value = false
+  }
 }
 
 async function submit() {
   if (mode.value === 'sms') {
-    ui.toast('演示环境请使用「密码登录」（如 user1 / 123456）', 'info')
-    mode.value = 'password'
+    if (!/^1\d{10}$/.test(phone.value)) {
+      ui.toast('请输入正确的手机号', 'error')
+      return
+    }
+    if (!code.value) {
+      ui.toast('请输入短信验证码', 'error')
+      return
+    }
+    loading.value = true
+    try {
+      await user.loginBySms(phone.value, code.value, remember.value)
+      await cart.load()
+      ui.toast('登录成功，欢迎回来')
+      router.replace((route.query.redirect as string) || '/')
+    } catch (err) {
+      ui.toast(err instanceof Error ? err.message : '登录失败', 'error')
+    } finally {
+      loading.value = false
+    }
     return
   }
   if (!account.value || !password.value) {
@@ -50,10 +79,15 @@ async function submit() {
   }
   loading.value = true
   try {
-    await user.login(account.value, password.value, {
-      captchaId: captchaId.value,
-      captchaCode: captchaCode.value,
-    })
+    await user.login(
+      account.value,
+      password.value,
+      {
+        captchaId: captchaId.value,
+        captchaCode: captchaCode.value,
+      },
+      remember.value,
+    )
     await cart.load()
     ui.toast('登录成功，欢迎回来')
     router.replace((route.query.redirect as string) || '/')
@@ -149,12 +183,17 @@ onMounted(refreshCaptcha)
             <label for="code">短信验证码</label>
             <div class="code-row">
               <input id="code" v-model="code" class="input" placeholder="请输入验证码" />
-              <button type="button" class="btn btn-secondary code-row__btn" :disabled="countdown > 0" @click="sendCode">
-                {{ countdown > 0 ? `${countdown}s` : '获取验证码' }}
+              <button type="button" class="btn btn-secondary code-row__btn" :disabled="countdown > 0 || sending" @click="sendCode">
+                {{ countdown > 0 ? `${countdown}s` : sending ? '发送中…' : '获取验证码' }}
               </button>
             </div>
           </div>
         </form>
+
+        <label class="remember">
+          <input v-model="remember" type="checkbox" />
+          <span>记住我（未勾选时关闭浏览器即退出登录）</span>
+        </label>
 
         <button class="btn btn-primary btn-block auth-card__submit" :disabled="loading" @click="submit">
           {{ loading ? '登录中…' : '登录' }}
@@ -276,6 +315,21 @@ onMounted(refreshCaptcha)
   margin-top: 6px;
   padding: 11px;
   font-weight: 700;
+}
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 2px 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.remember input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--amz-orange);
 }
 .auth-card__demo {
   text-align: center;

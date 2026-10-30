@@ -24,6 +24,15 @@ export const audit = asyncHandler(async (req: Request, res: Response) => {
   sendOk(
     res,
     await refundService.auditRefund(toInt(req.params.id, 0), input, `admin:${req.auth!.uid}`),
-    input.approve ? '已同意并退款' : '已拒绝',
+    input.approve ? '已同意' : '已拒绝',
+  )
+})
+
+export const receive = asyncHandler(async (req: Request, res: Response) => {
+  const input = z.object({ remark: z.string().max(255).optional() }).parse(req.body ?? {})
+  sendOk(
+    res,
+    await refundService.receiveReturn(toInt(req.params.id, 0), `admin:${req.auth!.uid}`, input.remark),
+    '已确认收到退货，售后完成',
   )
 })

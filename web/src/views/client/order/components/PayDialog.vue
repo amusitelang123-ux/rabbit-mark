@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { paymentApi } from '@/api'
 import type { PayChannel } from '@/api/types'
 import { useUiStore } from '@/stores/ui'
+import { useUserStore } from '@/stores/user'
 import { formatMoney } from '@/utils/money'
+import BalanceRechargeDialog from '@/components/BalanceRechargeDialog.vue'
 
 const props = defineProps<{ modelValue: boolean; orderNo: string; amount: number }>()
 const emit = defineEmits<{
@@ -12,13 +15,29 @@ const emit = defineEmits<{
 }>()
 
 const ui = useUiStore()
+const router = useRouter()
+const user = useUserStore()
+const balance = ref(0)
+const rechargeVisible = ref(false)
 
-const channels: { value: PayChannel; label: string; desc: string }[] = [
-  { value: 4, label: '沙箱支付', desc: '推荐用于演示，即时到账' },
-  { value: 1, label: '微信支付', desc: '模拟微信收银台' },
-  { value: 2, label: '支付宝', desc: '模拟支付宝收银台' },
-  { value: 3, label: '余额支付', desc: '使用账户余额抵扣' },
-]
+const shortfall = computed(() => Math.max(0, Number(props.amount) - balance.value))
+
+const channels = computed<{ value: PayChannel; label: string; desc: string; disabled?: boolean }[]>(
+  () => [
+    { value: 4, label: '沙箱支付', desc: '推荐用于演示，即时到账' },
+    { value: 1, label: '微信支付', desc: '模拟微信收银台' },
+    { value: 2, label: '支付宝', desc: '模拟支付宝收银台' },
+    {
+      value: 3,
+      label: '余额支付',
+      desc:
+        balance.value >= props.amount
+          ? `可用余额 ¥${formatMoney(balance.value)}`
+          : `余额不足（还差 ¥${formatMoney(shortfall.value)}），点击充值`,
+      disabled: balance.value < props.amount,
+    },
+  ],
+)
 
 const channel = ref<PayChannel>(4)
 const paying = ref(false)
@@ -29,22 +48,46 @@ watch(
     if (open) {
       channel.value = 4
       paying.value = false
+      if (user.isLoggedIn) {
+        user
+          .loadProfile()
+          .then(() => {
+            balance.value = user.user?.balance ?? 0
+          })
+          .catch(() => {
+            balance.value = 0
+          })
+      }
     }
   },
 )
 
+function selectChannel(item: { value: PayChannel; disabled?: boolean }) {
+  // 余额不足时点击余额支付直接打开充值弹窗，充完即可继续支付
+  if (item.value === 3 && item.disabled) {
+    rechargeVisible.value = true
+    return
+  }
+  if (item.disabled) {
+    ui.toast('账户余额不足，请选择其它支付方式', 'error')
+    return
+  }
+  channel.value = item.value
+}
+
+/** 充值成功后刷新可用余额，并按需自动选中余额支付 */
+function onRecharged(newBalance: number) {
+  balance.value = newBalance
+  if (newBalance >= props.amount) {
+    channel.value = 3
+    return
+  }
+  ui.toast(`当前余额仍不足，还差 ¥${formatMoney(props.amount - newBalance)}`, 'info')
+}
+
 function close() {
   if (paying.value) return
   emit('update:modelValue', false)
-}
-
-async function poll(payNo: string, times = 10): Promise<boolean> {
-  for (let i = 0; i < times; i++) {
-    const res = await paymentApi.status(payNo)
-    if (res.payStatus === 1) return true
-    await new Promise((r) => setTimeout(r, 1500))
-  }
-  return false
 }
 
 async function submit() {
@@ -56,15 +99,13 @@ async function submit() {
       payNo: prepay.payNo,
       amount: prepay.amount,
       sandboxToken: prepay.payParams.sandboxToken ?? '',
+      channel: channel.value,
     })
-    const ok = await poll(prepay.payNo)
-    if (ok) {
-      ui.toast('支付成功', 'success')
-      emit('paid')
-    } else {
-      ui.toast('支付结果确认中，请稍后在订单列表查看', 'info')
-    }
+    await user.loadProfile().catch(() => undefined)
+    emit('paid')
     emit('update:modelValue', false)
+    // 同步回跳：进入支付结果页轮询状态（U-32），不再只靠弹窗内的定时轮询
+    router.push({ path: '/pay/result', query: { payNo: prepay.payNo, orderNo: props.orderNo } })
   } catch (e) {
     ui.toast(e instanceof Error ? e.message : '支付失败', 'error')
   } finally {
@@ -92,8 +133,12 @@ async function submit() {
           v-for="c in channels"
           :key="c.value"
           class="pay-method"
-          :class="{ 'is-active': channel === c.value }"
-          @click="channel = c.value"
+          :class="{
+            'is-active': channel === c.value,
+            'is-disabled': c.disabled && c.value !== 3,
+            'is-short': c.value === 3 && c.disabled,
+          }"
+          @click="selectChannel(c)"
         >
           <span class="pay-method__dot" />
           <div class="pay-method__text">
@@ -108,6 +153,13 @@ async function submit() {
       </button>
       <p class="pay-modal__tip muted">演示环境使用沙箱支付，点击确认即视为支付成功</p>
     </div>
+
+    <BalanceRechargeDialog
+      v-model="rechargeVisible"
+      :balance="balance"
+      :suggested="shortfall"
+      @recharged="onRecharged"
+    />
   </div>
 </template>
 
@@ -181,6 +233,18 @@ async function submit() {
 .pay-method.is-active {
   border-color: var(--amz-orange);
   background: #fff8ec;
+}
+.pay-method.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pay-method.is-short {
+  opacity: 0.6;
+  cursor: pointer;
+}
+.pay-method.is-short:hover {
+  opacity: 1;
+  border-color: var(--amz-orange);
 }
 .pay-method__dot {
   width: 16px;

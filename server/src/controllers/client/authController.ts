@@ -14,27 +14,44 @@ const registerSchema = z.object({
   code: z.string().optional(),
 })
 
-const loginSchema = z.object({
-  account: z.string().optional(),
-  phone: z.string().optional(),
-  password: z.string().min(1, '请输入密码'),
-  captchaId: z.string().optional(),
-  captchaCode: z.string().optional(),
-})
+const loginSchema = z
+  .object({
+    account: z.string().optional(),
+    phone: z.string().optional(),
+    password: z.string().optional(),
+    /** 短信验证码登录 */
+    code: z.string().optional(),
+    captchaId: z.string().optional(),
+    captchaCode: z.string().optional(),
+  })
+  .refine((v) => Boolean(v.password) || Boolean(v.code), { message: '请输入密码或短信验证码' })
 
 /** 图形验证码（防爆破）：返回一次性 captchaId 与可直接展示的图片 */
 export const captcha = asyncHandler(async (_req: Request, res: Response) => {
   sendOk(res, createCaptcha())
 })
 
+/** 登录设备信息（U-45）：IP + UA，用于账户安全页展示 */
+function loginMeta(req: Request) {
+  return { ip: req.ip, userAgent: req.headers['user-agent'] }
+}
+
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const input = registerSchema.parse(req.body)
   if (!input.username && !input.phone) throw new AppError('用户名或手机号至少填写一项')
-  sendOk(res, await authService.register(input), '注册成功')
+  sendOk(res, await authService.register(input, loginMeta(req)), '注册成功')
 })
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const input = loginSchema.parse(req.body)
+
+  // 短信验证码登录：phone/code，不走图形验证码与密码校验
+  if (input.code && !input.password) {
+    const phone = input.phone || input.account || ''
+    if (!/^1\d{10}$/.test(phone)) throw new AppError('手机号格式不正确', ERR.PARAM)
+    sendOk(res, await authService.loginBySms({ phone, code: input.code }, loginMeta(req)), '登录成功')
+    return
+  }
 
   // 开启验证码时强制校验，校验后立即失效
   if (captchaEnabled()) {
@@ -46,7 +63,14 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     }
   }
 
-  sendOk(res, await authService.login(input), '登录成功')
+  sendOk(
+    res,
+    await authService.login(
+      { account: input.account, phone: input.phone, password: input.password! },
+      loginMeta(req),
+    ),
+    '登录成功',
+  )
 })
 
 export const refresh = asyncHandler(async (req: Request, res: Response) => {

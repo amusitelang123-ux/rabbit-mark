@@ -22,6 +22,8 @@ export interface CouponInput {
   scope?: number
   scopeIds?: number[]
   status?: number
+  /** 新人券：注册成功后自动发放 */
+  isNewUser?: boolean
 }
 
 function toCouponDto(c: Coupon) {
@@ -45,6 +47,7 @@ function toCouponDto(c: Coupon) {
       ? c.scopeIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
       : [],
     status: c.status,
+    isNewUser: Boolean(c.isNewUser),
     createdAt: formatDate(c.createdAt),
   }
 }
@@ -206,6 +209,7 @@ export async function createCoupon(input: CouponInput) {
     scope: config.scope,
     scopeIds: config.scopeIds,
     status: input.status ?? 1,
+    isNewUser: input.isNewUser ? 1 : 0,
   })
   return toCouponDto(coupon)
 }
@@ -269,6 +273,7 @@ export async function updateCoupon(id: number, input: Partial<CouponInput>) {
   coupon.scope = config.scope
   coupon.scopeIds = config.scopeIds
   if (input.status !== undefined) coupon.status = input.status
+  if (input.isNewUser !== undefined) coupon.isNewUser = input.isNewUser ? 1 : 0
   await coupon.save()
   return toCouponDto(coupon)
 }
@@ -701,22 +706,64 @@ export async function deleteSeckill(id: number) {
 
 /* -------------------------------- 满减活动 -------------------------------- */
 
+export interface PromotionThresholdInput {
+  amount: number
+  reduce?: number
+  giftProductId?: number
+  giftSkuId?: number
+  giftQuantity?: number
+}
+
 export interface PromotionInput {
   name: string
   type?: number
-  thresholds: { amount: number; reduce: number }[]
+  thresholds: PromotionThresholdInput[]
   startTime: string
   endTime: string
   status?: number
 }
 
+/** 按活动类型清洗档位：满减要求 reduce>0，满赠要求 giftSkuId + 数量 */
+function normalizePromotionThresholds(
+  type: number,
+  thresholds: PromotionThresholdInput[],
+): PromotionThresholdInput[] {
+  if (type === 1) {
+    const valid = thresholds
+      .filter((t) => t.amount > 0 && (t.reduce ?? 0) > 0)
+      .map((t) => ({ amount: t.amount, reduce: t.reduce }))
+    if (!valid.length) throw new AppError('满减活动至少配置一个有效档位', ERR.PARAM)
+    return valid
+  }
+  if (type === 2) {
+    const valid = thresholds
+      .filter((t) => t.amount > 0 && t.giftSkuId && (t.giftQuantity ?? 0) > 0)
+      .map((t) => ({
+        amount: t.amount,
+        reduce: 0,
+        giftProductId: t.giftProductId,
+        giftSkuId: t.giftSkuId,
+        giftQuantity: t.giftQuantity,
+      }))
+    if (!valid.length) throw new AppError('满赠活动至少配置一个有效赠品档位', ERR.PARAM)
+    return valid
+  }
+  throw new AppError('促销活动类型不合法', ERR.PARAM)
+}
+
 function toPromotionDto(p: Promotion) {
-  const rule = p.ruleJson as { thresholds?: { amount: number; reduce: number }[] } | null
+  const rule = p.ruleJson as { thresholds?: PromotionThresholdInput[] } | null
   return {
     id: Number(p.id),
     name: p.name,
     type: p.type,
-    thresholds: (rule?.thresholds ?? []).map((t) => ({ amount: Number(t.amount), reduce: Number(t.reduce) })),
+    thresholds: (rule?.thresholds ?? []).map((t) => ({
+      amount: Number(t.amount),
+      reduce: Number(t.reduce ?? 0),
+      ...(t.giftProductId ? { giftProductId: Number(t.giftProductId) } : {}),
+      ...(t.giftSkuId ? { giftSkuId: Number(t.giftSkuId) } : {}),
+      ...(t.giftQuantity ? { giftQuantity: Number(t.giftQuantity) } : {}),
+    })),
     startTime: formatDate(p.startTime),
     endTime: formatDate(p.endTime),
     status: p.status,
@@ -730,10 +777,12 @@ export async function listPromotions() {
 }
 
 export async function createPromotion(input: PromotionInput) {
+  const type = input.type ?? 1
+  const thresholds = normalizePromotionThresholds(type, input.thresholds)
   const promotion = await Promotion.create({
     name: input.name,
-    type: input.type ?? 1,
-    ruleJson: { thresholds: input.thresholds },
+    type,
+    ruleJson: { thresholds },
     startTime: new Date(input.startTime),
     endTime: new Date(input.endTime),
     status: input.status ?? 1,
@@ -743,10 +792,17 @@ export async function createPromotion(input: PromotionInput) {
 
 export async function updatePromotion(id: number, input: Partial<PromotionInput>) {
   const promotion = await Promotion.findByPk(id)
-  if (!promotion) throw AppError.notFound('满减活动不存在')
+  if (!promotion) throw AppError.notFound('促销活动不存在')
+  const nextType = input.type ?? promotion.type
   if (input.name !== undefined) promotion.name = input.name
   if (input.type !== undefined) promotion.type = input.type
-  if (input.thresholds !== undefined) promotion.ruleJson = { thresholds: input.thresholds }
+  if (input.thresholds !== undefined) {
+    promotion.ruleJson = { thresholds: normalizePromotionThresholds(nextType, input.thresholds) }
+  } else if (input.type !== undefined) {
+    // 切换活动类型时，按旧档位重新校验，避免满减档位被当成满赠
+    const old = (promotion.ruleJson as { thresholds?: PromotionThresholdInput[] } | null)?.thresholds ?? []
+    promotion.ruleJson = { thresholds: normalizePromotionThresholds(nextType, old) }
+  }
   if (input.startTime !== undefined) promotion.startTime = new Date(input.startTime)
   if (input.endTime !== undefined) promotion.endTime = new Date(input.endTime)
   if (input.status !== undefined) promotion.status = input.status
@@ -756,6 +812,6 @@ export async function updatePromotion(id: number, input: Partial<PromotionInput>
 
 export async function deletePromotion(id: number) {
   const promotion = await Promotion.findByPk(id)
-  if (!promotion) throw AppError.notFound('满减活动不存在')
+  if (!promotion) throw AppError.notFound('促销活动不存在')
   await promotion.destroy()
 }

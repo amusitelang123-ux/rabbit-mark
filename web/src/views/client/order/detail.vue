@@ -133,7 +133,7 @@ function openComment(item: OrderItem) {
 
 function openFirstComment() {
   if (!order.value) return
-  const item = order.value.items.find((it) => !it.isCommented)
+  const item = order.value.items.find((it) => !it.isCommented && !it.isGift)
   if (!item) {
     ui.toast('该订单商品已全部评价', 'info')
     return
@@ -169,12 +169,57 @@ const refundVisible = ref(false)
 const refundType = ref(1)
 const refundReason = ref('')
 const refundSubmitting = ref(false)
+const refundItemId = ref<number | undefined>(undefined)
+const refundAmount = ref<number | undefined>(undefined)
+const refundImages = ref<string[]>([])
+const refundUploading = ref(false)
 const canRefund = computed(() => order.value && [20, 30, 40].includes(order.value.status))
+const refundItemOptions = computed(() => (order.value?.items ?? []).filter((it) => !it.isGift))
 
 function openRefund() {
   refundType.value = 1
   refundReason.value = ''
+  refundItemId.value = undefined
+  refundAmount.value = order.value ? Number(order.value.payAmount) : undefined
+  refundImages.value = []
   refundVisible.value = true
+}
+
+/** 选择具体商品时，退款金额默认带出该明细小计 */
+function onRefundItemChange() {
+  if (!order.value) return
+  const item = order.value.items.find((it) => it.id === refundItemId.value)
+  refundAmount.value = item ? Number(item.subtotal) : Number(order.value.payAmount)
+}
+
+async function onRefundImages(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  for (const file of files) {
+    if (refundImages.value.length >= 3) break
+    if (!file.type.startsWith('image/')) {
+      ui.toast('请选择图片文件', 'error')
+      continue
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      ui.toast('单张图片不能超过 5MB', 'error')
+      continue
+    }
+    refundUploading.value = true
+    try {
+      const { url } = await refundApi.uploadImage(file)
+      refundImages.value.push(url)
+    } catch (e) {
+      ui.toast(e instanceof Error ? e.message : '凭证上传失败', 'error')
+    } finally {
+      refundUploading.value = false
+    }
+  }
+}
+
+function removeRefundImage(index: number) {
+  refundImages.value.splice(index, 1)
 }
 
 async function submitRefund() {
@@ -183,12 +228,24 @@ async function submitRefund() {
     ui.toast('请填写售后原因', 'error')
     return
   }
+  const amount = Number(refundAmount.value ?? 0)
+  if (!amount || amount <= 0) {
+    ui.toast('请填写正确的退款金额', 'error')
+    return
+  }
+  if (amount > Number(order.value.payAmount) + 0.001) {
+    ui.toast('退款金额不能超过实付金额', 'error')
+    return
+  }
   refundSubmitting.value = true
   try {
     await refundApi.apply({
       orderNo: order.value.orderNo,
+      orderItemId: refundItemId.value,
       type: refundType.value,
       reason: refundReason.value.trim(),
+      amount,
+      images: refundImages.value.length ? refundImages.value : undefined,
     })
     ui.toast('售后申请已提交，请等待审核')
     refundVisible.value = false
@@ -297,19 +354,21 @@ onMounted(async () => {
                   <div class="od-items__info">
                     <router-link :to="`/product/${it.productId}`" class="od-items__name">{{ it.productName }}</router-link>
                     <p class="muted">
-                      <span v-if="it.seckill" class="od-seckill-tag">秒杀</span>
+                      <span v-if="it.isGift" class="od-gift-tag">赠品</span>
+                      <span v-else-if="it.seckill" class="od-seckill-tag">秒杀</span>
                       {{ it.skuSpecText }}
                     </p>
                     <button
-                      v-if="order.status === 40 && !it.isCommented"
+                      v-if="order.status === 40 && !it.isCommented && !it.isGift"
                       class="od-items__comment"
                       @click="openComment(it)"
                     >
                       评价晒单
                     </button>
-                    <span v-else-if="order.status === 40" class="od-items__commented muted">已评价</span>
+                    <span v-else-if="order.status === 40 && !it.isGift" class="od-items__commented muted">已评价</span>
                   </div>
-                  <span class="od-items__price">¥{{ formatMoney(it.price) }} × {{ it.quantity }}</span>
+                  <span v-if="it.isGift" class="od-items__price muted">赠品 × {{ it.quantity }}</span>
+                  <span v-else class="od-items__price">¥{{ formatMoney(it.price) }} × {{ it.quantity }}</span>
                   <b class="od-items__subtotal">¥{{ formatMoney(it.subtotal) }}</b>
                 </li>
               </ul>
@@ -358,6 +417,10 @@ onMounted(async () => {
             <div v-if="order.promotionAmount > 0" class="od-summary__row">
               <span>满减优惠</span><b class="is-minus">-¥{{ formatMoney(order.promotionAmount) }}</b>
             </div>
+            <div v-if="order.pointsAmount" class="od-summary__row">
+              <span>积分抵扣</span>
+              <b class="is-minus">-¥{{ formatMoney(order.pointsAmount) }}</b>
+            </div>
             <div class="od-summary__total">
               <span>实付金额</span>
               <PriceTag :amount="order.payAmount" size="lg" />
@@ -366,6 +429,9 @@ onMounted(async () => {
               支付方式：{{ order.payType ? ['', '微信支付', '支付宝', '余额', '沙箱支付'][order.payType] : '未支付' }}
             </p>
             <p v-if="order.payTime" class="od-summary__pay muted">支付时间：{{ order.payTime }}</p>
+            <p v-if="order.invoice" class="od-summary__pay muted">
+              发票：{{ order.invoice.type === 2 ? '增值税专票' : '电子普票' }} · {{ order.invoice.title }}
+            </p>
           </aside>
         </div>
 
@@ -408,6 +474,37 @@ onMounted(async () => {
               >
                 {{ t.l }}
               </button>
+            </div>
+
+            <p class="rf-label">售后商品</p>
+            <select v-model="refundItemId" class="rf-select" @change="onRefundItemChange">
+              <option :value="undefined">整单售后</option>
+              <option v-for="it in refundItemOptions" :key="it.id" :value="it.id">
+                {{ it.productName }}（{{ it.skuSpecText }}）
+              </option>
+            </select>
+
+            <p class="rf-label">退款金额</p>
+            <input
+              v-model.number="refundAmount"
+              class="rf-input"
+              type="number"
+              min="0.01"
+              :max="order.payAmount"
+              step="0.01"
+              placeholder="请输入退款金额"
+            />
+
+            <p class="rf-label">上传凭证（最多 3 张）</p>
+            <div class="rf-images">
+              <div v-for="(img, i) in refundImages" :key="img" class="rf-image">
+                <img :src="img" alt="售后凭证" />
+                <button type="button" @click="removeRefundImage(i)">×</button>
+              </div>
+              <label v-if="refundImages.length < 3" class="rf-upload">
+                {{ refundUploading ? '上传中…' : '+' }}
+                <input type="file" accept="image/*" multiple hidden @change="onRefundImages" />
+              </label>
             </div>
 
             <p class="rf-label">售后原因</p>
@@ -662,6 +759,17 @@ onMounted(async () => {
   margin-right: 4px;
   vertical-align: middle;
 }
+.od-gift-tag {
+  display: inline-block;
+  background: #e67e22;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
 .od-logs {
   display: flex;
   flex-direction: column;
@@ -783,6 +891,65 @@ onMounted(async () => {
 }
 .rf-textarea:focus {
   border-color: var(--amz-orange);
+}
+.rf-select,
+.rf-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  background: #fff;
+}
+.rf-select:focus,
+.rf-input:focus {
+  border-color: var(--amz-orange);
+}
+.rf-images {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rf-image {
+  position: relative;
+  width: 70px;
+  height: 70px;
+}
+.rf-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.rf-image button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.rf-upload {
+  width: 70px;
+  height: 70px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: var(--bg-subtle);
 }
 .rf-actions {
   display: flex;

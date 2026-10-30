@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `username` VARCHAR(50) NULL COMMENT '用户名',
   `phone` VARCHAR(20) NULL COMMENT '手机号',
   `password` VARCHAR(255) NOT NULL COMMENT 'bcrypt 加密密码',
+  `pay_password` VARCHAR(255) NULL COMMENT '支付密码(bcrypt)',
   `nickname` VARCHAR(50) NULL COMMENT '昵称',
   `avatar` VARCHAR(255) NULL COMMENT '头像 URL',
   `gender` TINYINT NOT NULL DEFAULT 0 COMMENT '0未知 1男 2女',
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `level_id` INT NULL COMMENT '会员等级 id',
   `points` INT NOT NULL DEFAULT 0 COMMENT '积分余额',
   `total_spent` DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '累计消费',
+  `balance` DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '账户余额',
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1正常 0禁用',
   `last_login_at` DATETIME NULL COMMENT '最后登录时间',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +72,35 @@ CREATE TABLE IF NOT EXISTS `user_addresses` (
   CONSTRAINT `fk_address_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='收货地址表';
 
+CREATE TABLE IF NOT EXISTS `user_login_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `login_type` TINYINT NOT NULL DEFAULT 1 COMMENT '1密码 2短信 3注册',
+  `ip` VARCHAR(64) NULL,
+  `user_agent` VARCHAR(255) NULL,
+  `login_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_time` (`user_id`, `login_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户登录记录';
+
+CREATE TABLE IF NOT EXISTS `user_tags` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(30) NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户标签';
+
+CREATE TABLE IF NOT EXISTS `user_tag_relations` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `tag_id` INT NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_tag` (`user_id`, `tag_id`),
+  KEY `idx_tag` (`tag_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户标签关联';
+
 CREATE TABLE IF NOT EXISTS `user_points_log` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id` BIGINT UNSIGNED NOT NULL,
@@ -81,6 +112,38 @@ CREATE TABLE IF NOT EXISTS `user_points_log` (
   PRIMARY KEY (`id`),
   KEY `idx_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='积分流水表';
+
+CREATE TABLE IF NOT EXISTS `balance_recharges` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `pay_no` VARCHAR(32) NOT NULL COMMENT '充值单号(支付回调幂等键)',
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `amount` DECIMAL(10,2) NOT NULL COMMENT '充值金额',
+  `channel` TINYINT NOT NULL COMMENT '1微信 2支付宝 4沙箱',
+  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0待支付 1成功 2失败 4已关闭',
+  `third_party_no` VARCHAR(64) NULL,
+  `request_body` TEXT NULL,
+  `callback_body` TEXT NULL,
+  `paid_at` DATETIME NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_pay_no` (`pay_no`),
+  KEY `idx_user_status` (`user_id`, `status`),
+  KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='余额充值单';
+
+CREATE TABLE IF NOT EXISTS `balance_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` BIGINT UNSIGNED NOT NULL,
+  `type` TINYINT NOT NULL COMMENT '1充值 2余额支付 3退款入账 4后台调整',
+  `change` DECIMAL(12,2) NOT NULL COMMENT '变动金额(正负)',
+  `balance` DECIMAL(12,2) NOT NULL COMMENT '变动后余额',
+  `related_no` VARCHAR(32) NULL COMMENT '关联单号',
+  `remark` VARCHAR(255) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_time` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='余额流水';
 
 CREATE TABLE IF NOT EXISTS `user_favorites` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -144,6 +207,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `price_max` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '最高 SKU 价(冗余)',
   `total_stock` INT NOT NULL DEFAULT 0 COMMENT '总库存(冗余)',
   `sales_count` INT NOT NULL DEFAULT 0 COMMENT '销量(冗余)',
+  `cart_add_count` INT NOT NULL DEFAULT 0 COMMENT '累计加购件数',
   `comment_count` INT NOT NULL DEFAULT 0,
   `avg_score` DECIMAL(3,2) NOT NULL DEFAULT 5.00,
   `is_recommend` TINYINT NOT NULL DEFAULT 0,
@@ -282,6 +346,8 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `seckill_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '秒杀优惠快照',
   `promotion_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '满减优惠快照',
   `coupon_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '优惠券抵扣',
+  `points_used` INT NOT NULL DEFAULT 0 COMMENT '本单消耗积分',
+  `points_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '积分抵扣金额',
   `freight_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '运费',
   `pay_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '应付金额',
   `paid_amount` DECIMAL(10,2) NOT NULL DEFAULT 0 COMMENT '实付金额',
@@ -297,6 +363,8 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `receiver_address` VARCHAR(255) NULL,
   `remark` VARCHAR(255) NULL,
   `admin_remark` VARCHAR(255) NULL,
+  `is_abnormal` TINYINT NOT NULL DEFAULT 0 COMMENT '后台异常标记 1是 0否',
+  `abnormal_reason` VARCHAR(255) NULL COMMENT '异常原因',
   `user_deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '用户是否删除(仅隐藏，不做物理删除)',
   `user_deleted_at` DATETIME NULL COMMENT '用户删除时间',
   `remind_ship_count` INT NOT NULL DEFAULT 0 COMMENT '用户催发货次数',
@@ -325,6 +393,7 @@ CREATE TABLE IF NOT EXISTS `order_items` (
   `quantity` INT NOT NULL,
   `subtotal` DECIMAL(10,2) NOT NULL,
   `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0,
+  `is_gift` TINYINT NOT NULL DEFAULT 0 COMMENT '1满赠赠品 0普通商品',
   `is_commented` TINYINT NOT NULL DEFAULT 0,
   `refund_status` TINYINT NOT NULL DEFAULT 0 COMMENT '0无 1申请中 2已退款 3已拒绝',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -425,6 +494,7 @@ CREATE TABLE IF NOT EXISTS `coupons` (
   `scope` TINYINT NOT NULL DEFAULT 1 COMMENT '1全场 2指定分类 3指定商品',
   `scope_ids` JSON NULL,
   `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  `is_new_user` TINYINT NOT NULL DEFAULT 0 COMMENT '1新人券（注册自动发放） 0普通券',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
@@ -617,6 +687,29 @@ CREATE TABLE IF NOT EXISTS `stat_daily` (
 -- =============================================================
 -- 内容与配置域（补充）
 -- =============================================================
+
+CREATE TABLE IF NOT EXISTS `home_floors` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `title` VARCHAR(50) NOT NULL,
+  `subtitle` VARCHAR(100) NULL,
+  `category_id` INT NULL COMMENT '入口分类，空则跳全部商品',
+  `sort` INT NOT NULL DEFAULT 0,
+  `status` TINYINT NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_status_sort` (`status`, `sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='首页推荐楼层';
+
+CREATE TABLE IF NOT EXISTS `home_floor_products` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `floor_id` BIGINT UNSIGNED NOT NULL,
+  `product_id` BIGINT UNSIGNED NOT NULL,
+  `sort` INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_floor_product` (`floor_id`, `product_id`),
+  KEY `idx_floor_sort` (`floor_id`, `sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='首页楼层选品';
 
 CREATE TABLE IF NOT EXISTS `faqs` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

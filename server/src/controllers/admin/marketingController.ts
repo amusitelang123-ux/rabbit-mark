@@ -20,6 +20,7 @@ const couponSchema = z.object({
   scope: z.number().int().min(1).max(3).optional(),
   scopeIds: z.array(z.number().int().positive()).optional(),
   status: z.number().int().min(0).max(1).optional(),
+  isNewUser: z.boolean().optional(),
 })
 
 const bannerSchema = z.object({
@@ -147,7 +148,7 @@ export const removeSeckill = asyncHandler(async (req: Request, res: Response) =>
   sendOk(res, null, '秒杀活动已删除')
 })
 
-/* 满减活动 */
+/* 满减 / 满赠活动 */
 const promotionSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.number().int().min(1).max(2).optional(),
@@ -155,10 +156,13 @@ const promotionSchema = z.object({
     .array(
       z.object({
         amount: z.number().positive(),
-        reduce: z.number().positive(),
+        reduce: z.number().nonnegative().optional(),
+        giftProductId: z.number().int().positive().optional(),
+        giftSkuId: z.number().int().positive().optional(),
+        giftQuantity: z.number().int().positive().optional(),
       }),
     )
-    .min(1, '至少配置一个满减档位'),
+    .min(1, '至少配置一个活动档位'),
   startTime: z.string().min(1),
   endTime: z.string().min(1),
   status: z.number().int().min(0).max(1).optional(),
@@ -169,14 +173,14 @@ export const promotions = asyncHandler(async (_req: Request, res: Response) => {
 })
 
 export const createPromotion = asyncHandler(async (req: Request, res: Response) => {
-  sendOk(res, await marketing.createPromotion(promotionSchema.parse(req.body)), '满减活动已创建')
+  sendOk(res, await marketing.createPromotion(promotionSchema.parse(req.body)), '促销活动已创建')
 })
 
 export const updatePromotion = asyncHandler(async (req: Request, res: Response) => {
   sendOk(
     res,
     await marketing.updatePromotion(toInt(req.params.id, 0), promotionSchema.partial().parse(req.body)),
-    '满减活动已更新',
+    '促销活动已更新',
   )
 })
 

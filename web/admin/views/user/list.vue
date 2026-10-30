@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminApi } from '@admin/api'
-import type { AdminCustomer, AdminPointsLog, AdminUserDetail } from '@admin/api'
+import type { AdminCustomer, AdminPointsLog, AdminTag, AdminUserDetail } from '@admin/api'
 import { useAdminStore } from '@admin/stores/admin'
 
 const admin = useAdminStore()
@@ -10,9 +10,97 @@ const admin = useAdminStore()
 const loading = ref(false)
 const list = ref<AdminCustomer[]>([])
 const total = ref(0)
-const query = reactive({ keyword: '', status: undefined as number | undefined, page: 1, pageSize: 10 })
+const tags = ref<AdminTag[]>([])
+const query = reactive({
+  keyword: '',
+  status: undefined as number | undefined,
+  tagId: undefined as number | undefined,
+  page: 1,
+  pageSize: 10,
+})
 
 const drawer = reactive({ visible: false, loading: false, data: null as AdminUserDetail | null })
+const drawerTagIds = ref<number[]>([])
+
+/* 标签管理（A-35） */
+const tagDialog = reactive({ visible: false, newName: '' })
+
+async function loadTags() {
+  try {
+    tags.value = await adminApi.tagApi.list()
+  } catch {
+    tags.value = []
+  }
+}
+
+async function saveUserTags() {
+  if (!drawer.data) return
+  try {
+    await adminApi.userApi.setTags(drawer.data.id, drawerTagIds.value)
+    ElMessage.success('标签已保存')
+    drawer.data = await adminApi.userApi.detail(drawer.data.id)
+    drawerTagIds.value = drawer.data.tags.map((t) => t.id)
+    load()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '保存失败')
+  }
+}
+
+async function addTag() {
+  const name = tagDialog.newName.trim()
+  if (!name) {
+    ElMessage.warning('请输入标签名称')
+    return
+  }
+  try {
+    await adminApi.tagApi.create(name)
+    tagDialog.newName = ''
+    await loadTags()
+    ElMessage.success('标签已创建')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '创建失败')
+  }
+}
+
+async function renameTag(tag: AdminTag) {
+  let name = ''
+  try {
+    const res = await ElMessageBox.prompt('请输入新的标签名称', '重命名标签', {
+      inputValue: tag.name,
+      inputPattern: /\S+/,
+      inputErrorMessage: '名称不能为空',
+    })
+    name = res.value
+  } catch {
+    return
+  }
+  try {
+    await adminApi.tagApi.update(tag.id, name)
+    await loadTags()
+    load()
+    ElMessage.success('已重命名')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '重命名失败')
+  }
+}
+
+async function removeTag(tag: AdminTag) {
+  try {
+    await ElMessageBox.confirm(`删除标签「${tag.name}」会同时移除用户身上的该标签，确定吗？`, '提示', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await adminApi.tagApi.remove(tag.id)
+    await loadTags()
+    load()
+    ElMessage.success('已删除')
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '删除失败')
+  }
+}
 
 async function load() {
   loading.value = true
@@ -35,6 +123,7 @@ function search() {
 function reset() {
   query.keyword = ''
   query.status = undefined
+  query.tagId = undefined
   search()
 }
 
@@ -46,6 +135,7 @@ async function openDetail(row: AdminCustomer) {
   pointsLogs.value = []
   try {
     drawer.data = await adminApi.userApi.detail(row.id)
+    drawerTagIds.value = drawer.data.tags.map((t) => t.id)
     await loadPoints(row.id)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败')
@@ -58,7 +148,7 @@ async function openDetail(row: AdminCustomer) {
 const pointsBalance = ref(0)
 const pointsLogs = ref<AdminPointsLog[]>([])
 
-const POINTS_TYPE_TEXT: Record<number, string> = { 1: '签到', 2: '消费获得', 3: '积分抵扣', 4: '后台调整' }
+const POINTS_TYPE_TEXT: Record<number, string> = { 1: '签到', 2: '消费获得', 3: '积分抵扣', 4: '后台调整', 5: '评价奖励' }
 
 async function loadPoints(userId: number) {
   try {
@@ -112,7 +202,38 @@ async function toggleStatus(row: AdminCustomer) {
   }
 }
 
-onMounted(load)
+/** U-30：后台调整用户余额 */
+async function adjustBalance() {
+  if (!drawer.data) return
+  let change = 0
+  try {
+    const res = await ElMessageBox.prompt(
+      '请输入余额变动值（正数充值，负数扣减）',
+      '调整余额',
+      { inputValue: '0', inputPattern: /^-?\d+(\.\d{1,2})?$/, inputErrorMessage: '请输入最多两位小数的数字' },
+    )
+    change = Number(res.value)
+  } catch {
+    return
+  }
+  if (!change) {
+    ElMessage.warning('变动值不能为 0')
+    return
+  }
+  try {
+    const result = await adminApi.userApi.adjustBalance(drawer.data.id, change)
+    drawer.data.balance = result.balance
+    ElMessage.success(`调整成功，当前余额 ¥${result.balance}`)
+    load()
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '调整失败')
+  }
+}
+
+onMounted(async () => {
+  await loadTags()
+  load()
+})
 </script>
 
 <template>
@@ -128,9 +249,17 @@ onMounted(load)
             <el-option label="禁用" :value="0" />
           </el-select>
         </el-form-item>
+        <el-form-item label="标签">
+          <el-select v-model="query.tagId" placeholder="全部" clearable style="width: 140px">
+            <el-option v-for="t in tags" :key="t.id" :label="t.name" :value="t.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="reset">重置</el-button>
+          <el-button v-if="admin.hasPerm('user:update')" plain @click="tagDialog.visible = true">
+            标签管理
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -155,6 +284,12 @@ onMounted(load)
           <template #default="{ row }">¥{{ row.totalSpent }}</template>
         </el-table-column>
         <el-table-column label="积分" prop="points" width="90" />
+        <el-table-column label="标签" min-width="150">
+          <template #default="{ row }">
+            <el-tag v-for="t in row.tags" :key="t.id" size="small" class="user-tag">{{ t.name }}</el-tag>
+            <span v-if="!row.tags?.length" class="muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
@@ -192,12 +327,29 @@ onMounted(load)
             <el-descriptions-item label="手机号">{{ drawer.data.maskedPhone }}</el-descriptions-item>
             <el-descriptions-item label="会员等级">{{ drawer.data.levelName }}</el-descriptions-item>
             <el-descriptions-item label="累计消费">¥{{ drawer.data.totalSpent }}</el-descriptions-item>
+            <el-descriptions-item label="余额">¥{{ drawer.data.balance }}</el-descriptions-item>
             <el-descriptions-item label="积分">{{ drawer.data.points }}</el-descriptions-item>
             <el-descriptions-item label="订单总数">{{ drawer.data.orderCount }}</el-descriptions-item>
             <el-descriptions-item label="有效订单">{{ drawer.data.paidCount }}</el-descriptions-item>
             <el-descriptions-item label="订单金额" :span="2">¥{{ drawer.data.orderAmount }}</el-descriptions-item>
             <el-descriptions-item label="注册时间" :span="2">{{ drawer.data.createdAt }}</el-descriptions-item>
           </el-descriptions>
+
+          <h4 class="drawer-title">标签</h4>
+          <div class="tag-editor">
+            <el-select
+              v-model="drawerTagIds"
+              multiple
+              filterable
+              placeholder="选择用户标签"
+              style="flex: 1"
+            >
+              <el-option v-for="t in tags" :key="t.id" :label="t.name" :value="t.id" />
+            </el-select>
+            <el-button v-if="admin.hasPerm('user:update')" type="primary" @click="saveUserTags">
+              保存
+            </el-button>
+          </div>
 
           <h4 class="drawer-title">收货地址（{{ drawer.data.addresses.length }}）</h4>
           <el-empty v-if="!drawer.data.addresses.length" description="暂无地址" :image-size="60" />
@@ -214,6 +366,13 @@ onMounted(load)
           </div>
 
           <div class="drawer-title-row">
+            <h4 class="drawer-title">余额（¥{{ drawer.data.balance }}）</h4>
+            <el-button v-if="admin.hasPerm('user:update')" link type="primary" @click="adjustBalance">
+              调整余额
+            </el-button>
+          </div>
+
+          <div class="drawer-title-row">
             <h4 class="drawer-title">积分（余额 {{ pointsBalance }}）</h4>
             <el-button v-if="admin.hasPerm('points:adjust')" link type="primary" @click="adjustPoints">调整积分</el-button>
           </div>
@@ -226,6 +385,30 @@ onMounted(load)
         </template>
       </div>
     </el-drawer>
+
+    <el-dialog v-model="tagDialog.visible" title="标签管理" width="480px">
+      <div class="tag-add">
+        <el-input
+          v-model="tagDialog.newName"
+          placeholder="新标签名称，如 高价值用户"
+          maxlength="30"
+          @keyup.enter="addTag"
+        />
+        <el-button type="primary" @click="addTag">添加</el-button>
+      </div>
+      <el-empty v-if="!tags.length" description="暂无标签" :image-size="60" />
+      <ul v-else class="tag-manage-list">
+        <li v-for="t in tags" :key="t.id">
+          <span class="tag-manage-list__name">{{ t.name }}</span>
+          <span class="muted">{{ t.userCount }} 人</span>
+          <el-button link type="primary" @click="renameTag(t)">重命名</el-button>
+          <el-button link type="danger" @click="removeTag(t)">删除</el-button>
+        </li>
+      </ul>
+      <template #footer>
+        <el-button @click="tagDialog.visible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -237,6 +420,39 @@ onMounted(load)
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+.user-tag {
+  margin-right: 4px;
+  margin-bottom: 2px;
+}
+.tag-editor {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tag-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tag-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.tag-manage-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+}
+.tag-manage-list__name {
+  flex: 1;
+  font-size: 13px;
 }
 .user-cell {
   display: flex;

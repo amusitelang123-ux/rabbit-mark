@@ -32,6 +32,12 @@ export const invoices = asyncHandler(async (req: Request, res: Response) => {
   sendOk(res, await financeService.listInvoices(toInt(req.query.page, 1), toInt(req.query.pageSize, 10)))
 })
 
+/** 财务报表（A-64）：按年返回 12 个月收入/退款/净收入/成本/毛利 */
+export const report = asyncHandler(async (req: Request, res: Response) => {
+  const year = req.query.year ? toInt(req.query.year, 0) : new Date().getFullYear()
+  sendOk(res, await financeService.monthlyReport(year || new Date().getFullYear()))
+})
+
 export const setInvoiceStatus = asyncHandler(async (req: Request, res: Response) => {
   const { status } = z.object({ status: z.number().int().min(0).max(1) }).parse(req.body)
   sendOk(res, await financeService.setInvoiceStatus(toInt(req.params.id, 0), status as 0 | 1), '发票状态已更新')

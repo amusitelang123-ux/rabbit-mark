@@ -22,9 +22,16 @@ export interface AdminLoginResult {
 }
 
 export interface AdminOverview {
+  /** 统计区间：today / yesterday / 7d / 30d / all */
+  range: string
   orderCount: number
+  /** 已支付口径订单数（19/20/30/40） */
+  paidOrderCount: number
   gmv: number
+  /** 累计用户数 */
   userCount: number
+  /** 区间新增用户 */
+  newUsers: number
   productCount: number
   avgOrderAmount: number
   /** 待发货且用户已催发货的订单数 */
@@ -166,6 +173,8 @@ export interface AdminOrderQuery {
   status?: number
   /** 仅看用户已催发货的待发货订单 */
   onlyReminded?: boolean
+  /** 仅看后台标记的异常订单 */
+  onlyAbnormal?: boolean
   startTime?: string
   endTime?: string
   page?: number
@@ -219,15 +228,27 @@ export interface AdminCustomer {
   levelName: string
   points: number
   totalSpent: number
+  /** 账户余额（U-30） */
+  balance: number
   status: number
   lastLoginAt: string | null
   createdAt: string
+  /** 用户标签（A-35） */
+  tags?: { id: number; name: string }[]
+}
+
+/** 用户标签字典（A-35） */
+export interface AdminTag {
+  id: number
+  name: string
+  userCount: number
 }
 
 export interface AdminUserDetail extends AdminCustomer {
   orderCount: number
   paidCount: number
   orderAmount: number
+  tags: { id: number; name: string }[]
   addresses: {
     id: number
     receiver: string
@@ -277,7 +298,111 @@ export interface AdminCoupon {
   scope: number
   scopeIds: number[]
   status: number
+  /** 新人券：注册自动发放 */
+  isNewUser?: boolean
   createdAt: string
+}
+
+/** 首页推荐楼层（A-44） */
+export interface AdminHomeFloorProduct {
+  id: number
+  name: string
+  image: string
+}
+
+export interface AdminHomeFloor {
+  id: number
+  title: string
+  subtitle: string
+  categoryId: number | null
+  sort: number
+  status: number
+  products: AdminHomeFloorProduct[]
+}
+
+export interface HomeFloorPayload {
+  title: string
+  subtitle?: string
+  categoryId?: number | null
+  sort?: number
+  status?: number
+  productIds?: number[]
+}
+
+/** 每日经营预聚合（stat_daily） */
+export interface DailyStatItem {
+  statDate: string
+  gmv: number
+  orderCount: number
+  paidCount: number
+  newUsers: number
+  refundAmount: number
+  avgOrderAmount: number
+}
+
+/** 活动数据（A-45） */
+export interface MarketingCouponStat {
+  id: number
+  name: string
+  type: number
+  amount: number
+  totalCount: number
+  receivedCount: number
+  usedCount: number
+  orderCount: number
+  gmv: number
+}
+
+export interface MarketingSeckillStat {
+  id: number
+  name: string
+  startTime: string
+  endTime: string
+  status: number
+  productCount: number
+  soldCount: number
+  gmv: number
+  discountAmount: number
+}
+
+export interface MarketingPromotionStat {
+  id: number
+  name: string
+  type: number
+  startTime: string
+  endTime: string
+  status: number
+}
+
+export interface MarketingActivityStats {
+  coupons: MarketingCouponStat[]
+  seckills: MarketingSeckillStat[]
+  promotions: MarketingPromotionStat[]
+  promotionSummary: { orderCount: number; discountTotal: number }
+}
+
+/** 财务报表（A-64） */
+export interface FinanceReportMonth {
+  month: string
+  income: number
+  refund: number
+  net: number
+  cost: number
+  gross: number
+  grossRate: number
+}
+
+export interface FinanceReport {
+  year: number
+  months: FinanceReportMonth[]
+  total: {
+    income: number
+    refund: number
+    net: number
+    cost: number
+    gross: number
+    grossRate: number
+  }
 }
 
 export interface AdminBanner {
@@ -317,6 +442,16 @@ export interface ProductRankItem {
   image: string
   sales: string
   amount: string
+  /** 累计加购件数（A-52） */
+  cartCount: number
+}
+
+/** 订单状态分布（A-55） */
+export interface OrderStatusStat {
+  status: number
+  statusText: string
+  count: number
+  amount: number
 }
 
 export interface CategorySalesItem {
@@ -422,11 +557,20 @@ export interface AdminSeckill {
   products: AdminSeckillProduct[]
 }
 
+/** 促销档位：满减用 reduce，满赠用 giftSkuId + giftQuantity */
+export interface PromotionThreshold {
+  amount: number
+  reduce?: number
+  giftProductId?: number
+  giftSkuId?: number
+  giftQuantity?: number
+}
+
 export interface AdminPromotion {
   id: number
   name: string
   type: number
-  thresholds: { amount: number; reduce: number }[]
+  thresholds: PromotionThreshold[]
   startTime: string
   endTime: string
   status: number

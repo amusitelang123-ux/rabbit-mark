@@ -1,4 +1,5 @@
 import type { ApiResponse } from './types'
+import { readStored } from '@/utils/authStorage'
 
 type RequestOptions = Omit<RequestInit, 'body'> & {
   params?: Record<string, string | number | undefined>
@@ -30,7 +31,7 @@ export function createHttp(baseUrl: string, tokenKey: string): HttpClient {
   }
 
   function authHeaders(): Record<string, string> {
-    const token = localStorage.getItem(tokenKey)
+    const token = readStored(tokenKey)
     return token ? { Authorization: `Bearer ${token}` } : {}
   }
 
@@ -49,6 +50,7 @@ export function createHttp(baseUrl: string, tokenKey: string): HttpClient {
 
     if (res.status === 401) {
       localStorage.removeItem(tokenKey)
+      sessionStorage.removeItem(tokenKey)
       throw new Error('未登录或登录已过期')
     }
 

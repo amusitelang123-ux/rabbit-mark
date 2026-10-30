@@ -29,6 +29,9 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
   sendOk(res, await adminService.me(req.auth!.uid))
 })
 
-export const overview = asyncHandler(async (_req: Request, res: Response) => {
-  sendOk(res, await adminService.overview())
+export const overview = asyncHandler(async (req: Request, res: Response) => {
+  const allowed = ['today', 'yesterday', '7d', '30d', 'all']
+  const raw = String(req.query.range ?? 'all')
+  const range = (allowed.includes(raw) ? raw : 'all') as adminService.StatsRange
+  sendOk(res, await adminService.overview(range))
 })

@@ -215,6 +215,7 @@ VITE_USE_MOCK=true
 | 商品 | `GET /api/client/v1/products`、`/products/:id`、`/products/:id/comments`、`/products/:id/recommend` |
 | 购物车 | `GET/POST /api/client/v1/cart`、`PUT /cart/:id`、`PUT /cart/select-all`、`DELETE /cart` |
 | 用户 | `GET/PUT /api/client/v1/user/profile`、`/user/addresses`、`/user/favorites`、`/user/footprints`、`/user/coupons` |
+| 钱包 / 余额充值 | `GET /api/client/v1/user/wallet`、`POST /user/wallet/recharges`、`GET /user/wallet/recharges/:payNo`、`POST /payments/recharge/callback/:channel` |
 | 订单 | `POST/GET /api/client/v1/orders`、`GET /orders/:orderNo`、`PUT /orders/:orderNo/cancel` `/confirm`、`GET /orders/:orderNo/logistics`、`POST /orders/:orderNo/rebuy` `/remind-ship`、`DELETE /orders/:orderNo` |
 | 评价 | `GET /api/client/v1/user/comments`、`POST /comments`、`POST /comments/images`（晒单图上传） |
 | 优惠券 | `GET /api/client/v1/coupons/center`、`POST /coupons/:id/receive` |
@@ -223,6 +224,8 @@ VITE_USE_MOCK=true
 > 订单删除遵循企划 4.1「订单类不删除只置状态」：`DELETE /orders/:orderNo` 仅置 `orders.user_deleted=1` 做用户侧隐藏，订单、支付与财务记录全部保留，后台订单管理仍可查询。
 >
 > 用户「提醒发货」会累加 `orders.remind_ship_count` 并记录 `last_remind_ship_at`；后台订单列表顶部展示催发货告警，支持 `onlyReminded=1` 筛选，订单详情展示催发货次数与最近提醒时间。
+>
+> 余额支付（U-30）：用户端「个人中心 → 我的钱包」可充值，收银台余额不足时会引导充值；充值单独立于订单支付单，回调成功后入账并写入余额流水（充值 / 余额支付 / 售后退款 / 后台调账）。
 
 数据库设计详见 `server/database/sql/xtx_mall.schema.sql`。
 

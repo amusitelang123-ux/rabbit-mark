@@ -25,6 +25,8 @@ export const ERR = {
   PAY_AMOUNT_MISMATCH: 15002,
   PAY_RECORD_NOT_FOUND: 15003,
   PAY_STATUS_INVALID: 15004,
+  BALANCE_NOT_ENOUGH: 15005,
+  RECHARGE_NOT_FOUND: 15006,
   // 营销
   COUPON_INVALID: 16001,
   // 后台与权限
@@ -46,6 +48,21 @@ export const PAY_STATUS = {
   FAILED: 2,
   REFUNDED: 3,
   CLOSED: 4,
+} as const
+
+/** 余额流水类型（U-30） */
+export const BALANCE_LOG_TYPE = {
+  RECHARGE: 1,
+  PAYMENT: 2,
+  REFUND: 3,
+  ADMIN_ADJUST: 4,
+} as const
+
+/** 余额充值规则：单笔金额范围与快捷金额（单位：元） */
+export const BALANCE_RECHARGE = {
+  MIN: 0.01,
+  MAX: 50000,
+  PRESETS: [50, 100, 200, 500, 1000, 2000],
 } as const
 
 /** 库存变更类型 */
@@ -70,6 +87,10 @@ export const REFUND_STATUS = {
   APPROVED: 1,
   REJECTED: 2,
   REFUNDED: 3,
+  /** 已同意退货/换货，等待商家收到退货 */
+  AWAITING_RETURN: 4,
+  /** 换货完成（无退款） */
+  EXCHANGED: 5,
 } as const
 
 /** 财务流水类型 */
@@ -93,9 +114,10 @@ export const POINTS_TYPE = {
   ORDER_REWARD: 2,
   DEDUCT: 3,
   ADMIN_ADJUST: 4,
+  COMMENT_REWARD: 5,
 } as const
 
-/** 签到 / 消费积分规则 */
+/** 签到 / 消费 / 评价积分规则 */
 export const POINTS_RULE = {
   /** 每日签到基础积分 */
   SIGN_IN_BASE: 10,
@@ -105,6 +127,12 @@ export const POINTS_RULE = {
   SIGN_IN_MAX_BONUS: 20,
   /** 消费获得积分比例：1 元 = 1 积分 */
   PER_YUAN: 1,
+  /** 评价晒单奖励积分（U-65） */
+  COMMENT_REWARD: 5,
+  /** 积分抵现：100 积分 = 1 元（U-64） */
+  DEDUCT_POINTS_PER_YUAN: 100,
+  /** 单笔订单最多抵扣应付金额的 50% */
+  DEDUCT_MAX_RATE: 0.5,
 } as const
 
 export const ORDER_STATUS = {

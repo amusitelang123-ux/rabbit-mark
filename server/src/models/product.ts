@@ -75,6 +75,8 @@ export class Product extends Model<InferAttributes<Product>, InferCreationAttrib
   declare priceMax: CreationOptional<string>
   declare totalStock: CreationOptional<number>
   declare salesCount: CreationOptional<number>
+  /** 累计加购件数（A-52 加购榜） */
+  declare cartAddCount: CreationOptional<number>
   declare commentCount: CreationOptional<number>
   declare avgScore: CreationOptional<string>
   declare isRecommend: CreationOptional<number>
@@ -100,6 +102,7 @@ Product.init(
     priceMax: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     totalStock: { type: DataTypes.INTEGER, defaultValue: 0 },
     salesCount: { type: DataTypes.INTEGER, defaultValue: 0 },
+    cartAddCount: { type: DataTypes.INTEGER, defaultValue: 0 },
     commentCount: { type: DataTypes.INTEGER, defaultValue: 0 },
     avgScore: { type: DataTypes.DECIMAL(3, 2), defaultValue: 5 },
     isRecommend: { type: DataTypes.TINYINT, defaultValue: 0 },

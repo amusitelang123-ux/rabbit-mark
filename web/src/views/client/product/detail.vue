@@ -10,6 +10,7 @@ import ProductCard from '@/components/ProductCard.vue'
 import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
 import { useUserStore } from '@/stores/user'
+import { shareLink } from '@/utils/share'
 
 
 const route = useRoute()
@@ -56,6 +57,8 @@ const selectedSku = computed(() => {
 const displayPrice = computed(() => selectedSku.value?.price ?? product.value?.priceMin ?? 0)
 const displayMarket = computed(() => selectedSku.value?.marketPrice ?? 0)
 const displayStock = computed(() => selectedSku.value?.stock ?? product.value?.totalStock ?? 0)
+/** 后台录入的商品参数（产地/保质期等），仅在详情页“规格参数”中展示 */
+const attributes = computed(() => product.value?.attributes ?? [])
 const displayImage = computed(
   () => previewImage.value || product.value?.mainImage || selectedSku.value?.image || '',
 )
@@ -115,8 +118,20 @@ async function buyNow() {
   if (await addToCart(true)) router.push('/checkout')
 }
 
-async function toggleFavorite() {
+/** 分享（U-66）：优先系统分享面板，不支持时复制当前商品链接 */
+async function shareProduct() {
   if (!product.value) return
+  const result = await shareLink({
+    title: product.value.name,
+    text: product.value.subtitle || product.value.name,
+    url: window.location.href,
+  })
+  if (result === 'copied') ui.toast('商品链接已复制，去分享吧')
+  else if (result === 'shared') ui.toast('已调起系统分享')
+  else if (result === 'failed') ui.toast('分享失败，请手动复制地址栏链接', 'error')
+}
+
+async function toggleFavorite() {  if (!product.value) return
   if (!user.isLoggedIn) {
     ui.toast('请先登录后再收藏', 'info')
     router.push({ name: 'login', query: { redirect: route.fullPath } })
@@ -277,7 +292,7 @@ watch(
               <button @click="toggleFavorite">
                 {{ favorited ? '♥ 已收藏' : '♡ 收藏' }}
               </button>
-              <button @click="ui.toast('链接已复制（演示）', 'info')">分享</button>
+              <button @click="shareProduct">分享</button>
             </div>
             <div class="pd__buy-secure">🔒 安全交易 · 信息加密</div>
           </aside>
@@ -311,6 +326,10 @@ watch(
                 <tr><th>品牌</th><td>{{ product.brandName }}</td></tr>
                 <tr><th>分类</th><td>{{ product.categoryName }}</td></tr>
                 <tr><th>单位</th><td>{{ product.unit }}</td></tr>
+                <tr v-for="a in attributes" :key="a.name">
+                  <th>{{ a.name }}</th>
+                  <td>{{ a.value }}</td>
+                </tr>
                 <tr v-for="g in specGroups" :key="g.name">
                   <th>{{ g.name }}</th>
                   <td>{{ g.values.join(' / ') }}</td>

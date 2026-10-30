@@ -12,6 +12,8 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare username: string | null
   declare phone: string | null
   declare password: string
+  /** 支付密码（bcrypt），未设置时为 null */
+  declare payPassword: string | null
   declare nickname: string | null
   declare avatar: string | null
   declare gender: CreationOptional<number>
@@ -19,6 +21,8 @@ export class User extends Model<InferAttributes<User>, InferCreationAttributes<U
   declare levelId: number | null
   declare points: CreationOptional<number>
   declare totalSpent: CreationOptional<string>
+  /** 账户余额（U-30 余额支付） */
+  declare balance: CreationOptional<string>
   declare status: CreationOptional<number>
   declare lastLoginAt: Date | null
   declare createdAt: CreationOptional<Date>
@@ -32,6 +36,7 @@ User.init(
     username: { type: DataTypes.STRING(50), allowNull: true },
     phone: { type: DataTypes.STRING(20), allowNull: true },
     password: { type: DataTypes.STRING(255), allowNull: false },
+    payPassword: { type: DataTypes.STRING(255), allowNull: true },
     nickname: { type: DataTypes.STRING(50), allowNull: true },
     avatar: { type: DataTypes.STRING(255), allowNull: true },
     gender: { type: DataTypes.TINYINT, defaultValue: 0 },
@@ -39,6 +44,7 @@ User.init(
     levelId: { type: DataTypes.INTEGER, allowNull: true },
     points: { type: DataTypes.INTEGER, defaultValue: 0 },
     totalSpent: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+    balance: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
     status: { type: DataTypes.TINYINT, defaultValue: 1 },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
     createdAt: DataTypes.DATE,
@@ -167,4 +173,65 @@ UserPointsLog.init(
     createdAt: DataTypes.DATE,
   },
   { sequelize, tableName: 'user_points_log', timestamps: true, updatedAt: false },
+)
+
+/** 登录设备记录（U-45）：1密码 2短信 3注册 */
+export class UserLoginLog extends Model<
+  InferAttributes<UserLoginLog>,
+  InferCreationAttributes<UserLoginLog>
+> {
+  declare id: CreationOptional<number>
+  declare userId: number
+  declare loginType: CreationOptional<number>
+  declare ip: string | null
+  declare userAgent: string | null
+  declare loginAt: CreationOptional<Date>
+}
+
+UserLoginLog.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    loginType: { type: DataTypes.TINYINT, defaultValue: 1 },
+    ip: { type: DataTypes.STRING(64), allowNull: true },
+    userAgent: { type: DataTypes.STRING(255), allowNull: true },
+    loginAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  },
+  { sequelize, tableName: 'user_login_logs', timestamps: false },
+)
+
+/** 用户标签（A-35）：后台打标/分群 */
+export class UserTag extends Model<InferAttributes<UserTag>, InferCreationAttributes<UserTag>> {
+  declare id: CreationOptional<number>
+  declare name: string
+  declare createdAt: CreationOptional<Date>
+}
+
+UserTag.init(
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    name: { type: DataTypes.STRING(30), allowNull: false },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'user_tags', timestamps: true, updatedAt: false },
+)
+
+export class UserTagRelation extends Model<
+  InferAttributes<UserTagRelation>,
+  InferCreationAttributes<UserTagRelation>
+> {
+  declare id: CreationOptional<number>
+  declare userId: number
+  declare tagId: number
+  declare createdAt: CreationOptional<Date>
+}
+
+UserTagRelation.init(
+  {
+    id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+    tagId: { type: DataTypes.INTEGER, allowNull: false },
+    createdAt: DataTypes.DATE,
+  },
+  { sequelize, tableName: 'user_tag_relations', timestamps: true, updatedAt: false },
 )

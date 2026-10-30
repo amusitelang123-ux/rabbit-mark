@@ -109,7 +109,10 @@ async function submit() {
       images: images.value.length ? images.value : undefined,
       isAnonymous: anonymous.value,
     })
-    ui.toast('评价发布成功', 'success')
+    ui.toast(
+      created.rewardPoints ? `评价发布成功，获得 ${created.rewardPoints} 积分` : '评价发布成功',
+      'success',
+    )
     emit('submitted', created)
     emit('update:modelValue', false)
   } catch (e) {

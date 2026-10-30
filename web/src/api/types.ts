@@ -64,6 +64,8 @@ export interface Product {
   avgScore: number
   isRecommend: boolean
   tags: string[]
+  /** 商品参数（后台维护，详情页“规格参数”展示） */
+  attributes?: { name: string; value: string }[]
   categoryName: string
   brandName: string
   topCategoryId: number
@@ -134,6 +136,8 @@ export interface OrderItem {
   seckill: boolean
   quantity: number
   subtotal: number
+  /** 满赠赠品（U-62） */
+  isGift?: boolean
   isCommented: boolean
 }
 
@@ -147,6 +151,29 @@ export interface OrderLogItem {
   createdAt: string
 }
 
+/** 订单支付流水（后台订单详情） */
+export interface OrderPaymentInfo {
+  payNo: string
+  channel: number
+  /** 0待支付 1成功 2失败 3已退款 4已关闭 */
+  status: number
+  amount: number
+  thirdPartyNo: string
+  paidAt: string | null
+}
+
+/** 订单发票信息（下单时用户选择） */
+export interface OrderInvoice {
+  /** 1 电子普票 2 增值税专票 */
+  type: number
+  title: string
+  taxNo: string
+  email: string
+  content: string
+  /** 0 待开票 1 已开票 */
+  status: number
+}
+
 export interface Order {
   orderNo: string
   status: OrderStatus
@@ -158,6 +185,10 @@ export interface Order {
   /** 满减活动抵扣 */
   promotionAmount: number
   couponAmount: number
+  /** 积分抵现消耗的积分（U-64） */
+  pointsUsed?: number
+  /** 积分抵现抵扣金额 */
+  pointsAmount?: number
   freightAmount: number
   payAmount: number
   receiverName: string
@@ -172,6 +203,13 @@ export interface Order {
   /** 最近一次催发货时间 */
   lastRemindShipAt: string | null
   remark: string
+  /** 后台异常标记（仅后台使用） */
+  isAbnormal?: boolean
+  abnormalReason?: string
+  /** 发票信息，未开票为 null */
+  invoice?: OrderInvoice | null
+  /** 支付流水（仅后台详情接口返回） */
+  payment?: OrderPaymentInfo | null
   createdAt: string
   /** 订单操作日志时间轴（仅详情接口返回） */
   logs: OrderLogItem[]
@@ -282,10 +320,69 @@ export interface UserInfo {
   levelName: string
   points: number
   totalSpent: number
+  /** 账户余额（U-30） */
+  balance?: number
+  /** 是否已设置支付密码（U-45） */
+  hasPayPassword?: boolean
+}
+
+/** 登录设备记录（U-45） */
+export interface LoginLogItem {
+  id: number
+  /** 1 密码 2 短信 3 注册 */
+  loginType: number
+  ip: string
+  userAgent: string
+  loginAt: string
 }
 
 /** 支付渠道：1微信 2支付宝 3余额 4沙箱 */
 export type PayChannel = 1 | 2 | 3 | 4
+
+/** 充值渠道：余额不能充值自身，因此排除 3 */
+export type RechargeChannel = 1 | 2 | 4
+
+/** 余额流水类型：1充值 2余额支付 3退款入账 4后台调整 */
+export interface BalanceLog {
+  id: number
+  type: number
+  change: number
+  balance: number
+  relatedNo: string
+  remark: string
+  createdAt: string
+}
+
+/** 充值记录（钱包页展示，含未支付/失败单） */
+export interface BalanceRecharge {
+  payNo: string
+  amount: number
+  channel: number
+  status: number
+  paidAt: string
+  createdAt: string
+}
+
+export interface MyWallet {
+  balance: number
+  /** 累计充值金额（成功入账流水汇总） */
+  totalRecharged: number
+  logs: BalanceLog[]
+  recharges: BalanceRecharge[]
+}
+
+export interface RechargePayload {
+  amount: number
+  channel: RechargeChannel
+}
+
+export interface RechargeStatusResult {
+  payNo: string
+  payStatus: number
+  amount: number
+  balance: number
+  paidAt: string
+}
 
 export interface PrepayResult {
   payNo: string
@@ -333,6 +430,8 @@ export interface MyComment {
   replyContent: string
   status: number
   createdAt: string
+  /** 发布评价获得的积分（评价有礼） */
+  rewardPoints?: number
 }
 
 /** 待评价明细 */
@@ -367,13 +466,22 @@ export interface MyPoints {
   logs: PointsLog[]
 }
 
-/** 生效中的满减活动 */
+/** 生效中的满减/满赠活动 */
 export interface ActivePromotion {
   id: number
   name: string
   type: number
   endTime: string
-  thresholds: { amount: number; reduce: number }[]
+  thresholds: {
+    amount: number
+    reduce: number
+    /** 满赠档位：赠品信息（服务端已反查名称/图片） */
+    giftProductId?: number
+    giftSkuId?: number
+    giftQuantity?: number
+    giftName?: string
+    giftImage?: string
+  }[]
 }
 
 /** 帮助中心 FAQ */

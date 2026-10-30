@@ -8,6 +8,7 @@ import type {
   Coupon,
   CouponPreviewResult,
   DeleteOrderResult,
+  LoginLogItem,
   Order,
   OrderLogisticsDetail,
   PageResult,
@@ -20,6 +21,9 @@ import type {
   MyComment,
   MyComments,
   MyPoints,
+  MyWallet,
+  RechargePayload,
+  RechargeStatusResult,
   ActivePromotion,
   FaqGroup,
   LogisticsCompanyItem,
@@ -48,13 +52,15 @@ export interface HomeData {
   seckills: SeckillProduct[]
   categories: Category[]
   recommend: Product[]
-  floors: { title: string; subtitle: string; categoryId: number; products: Product[] }[]
+  floors: { title: string; subtitle: string; categoryId: number | null; products: Product[] }[]
 }
 
 export interface LoginResult {
   user: UserInfo
   token: string
   refreshToken: string
+  /** 注册时自动发放的新人券数量（U-63） */
+  newUserCoupons?: number
 }
 
 export interface RegisterPayload {
@@ -71,10 +77,22 @@ export interface ProfilePatch {
   birthday?: string
 }
 
+export interface CreateOrderInvoice {
+  /** 1 电子普通发票 2 增值税专用发票 */
+  type: 1 | 2
+  title: string
+  taxNo?: string
+  email?: string
+  content?: string
+}
+
 export interface CreateOrderPayload {
   addressId?: number
   couponId?: number
   remark?: string
+  /** 使用积分抵现（100 积分 = 1 元，最多抵扣应付金额 50%） */
+  usePoints?: boolean
+  invoice?: CreateOrderInvoice
 }
 
 export interface AddressPayload {
@@ -102,6 +120,8 @@ export interface SandboxPayPayload {
   payNo: string
   amount: number
   sandboxToken: string
+  /** 支付渠道：决定回调路由（余额支付=3） */
+  channel?: number
 }
 
 /** 用户端 API 契约：Mock 与真实后端都实现该接口 */
@@ -131,7 +151,7 @@ export interface ClientApi {
     receive(id: number): Promise<{ id: number; couponId: number }>
   }
   orderApi: {
-    list(status?: number): Promise<Order[]>
+    list(status?: number, page?: number, pageSize?: number): Promise<PageResult<Order>>
     detail(orderNo: string): Promise<Order | undefined>
     create(payload?: CreateOrderPayload): Promise<Order>
     cancel(orderNo: string): Promise<Order>
@@ -157,12 +177,18 @@ export interface ClientApi {
       password: string,
       captcha?: { captchaId: string; captchaCode: string },
     ): Promise<LoginResult>
+    /** 手机验证码登录（演示环境固定验证码 8888） */
+    loginBySms(phone: string, code: string): Promise<LoginResult>
     captcha(): Promise<{ captchaId: string; image: string; expireIn: number }>
     register(payload: RegisterPayload): Promise<LoginResult>
     profile(): Promise<UserInfo>
     updateProfile(patch: ProfilePatch): Promise<UserInfo>
     uploadAvatar(file: File): Promise<UserInfo>
     changePassword(payload: { oldPassword: string; newPassword: string }): Promise<{ changed: boolean }>
+    /** 设置/修改支付密码（U-45） */
+    setPayPassword(payload: { password: string; oldPassword?: string }): Promise<{ hasPayPassword: boolean }>
+    /** 登录设备记录（U-45） */
+    loginLogs(): Promise<LoginLogItem[]>
     sendSmsCode(phone: string): Promise<{ phone: string; code: string }>
     resetPassword(payload: { phone: string; code: string; newPassword: string }): Promise<{ reset: boolean }>
     favorites(): Promise<Product[]>
@@ -182,9 +208,21 @@ export interface ClientApi {
     /** 沙箱支付：直接向回调地址提交支付结果，模拟网关异步通知 */
     sandboxPay(payload: SandboxPayPayload): Promise<void>
   }
+  walletApi: {
+    /** 我的钱包：余额 + 最近资金流水 + 充值记录 */
+    mine(): Promise<MyWallet>
+    /** 创建充值单，返回收银台参数 */
+    create(payload: RechargePayload): Promise<PrepayResult>
+    /** 充值结果查询（同步回跳后轮询） */
+    status(payNo: string): Promise<RechargeStatusResult>
+    /** 沙箱充值回调：模拟网关异步通知并即时入账 */
+    sandboxPay(payload: SandboxPayPayload): Promise<void>
+  }
   refundApi: {
     apply(payload: ApplyRefundPayload): Promise<Refund>
     mine(): Promise<Refund[]>
+    /** 售后凭证上传（单张，最大 5MB） */
+    uploadImage(file: File): Promise<{ url: string }>
   }
   commentApi: {
     mine(): Promise<MyComments>

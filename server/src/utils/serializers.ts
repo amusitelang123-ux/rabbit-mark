@@ -1,5 +1,13 @@
-import type { Brand, Category, Product, ProductImage, ProductSku, ProductComment } from '../models/product'
-import type { Order, OrderItem, OrderLog, OrderLogistics } from '../models/trade'
+import type {
+  Brand,
+  Category,
+  Product,
+  ProductAttribute,
+  ProductImage,
+  ProductSku,
+  ProductComment,
+} from '../models/product'
+import type { Order, OrderItem, OrderLog, OrderLogistics, Invoice, PaymentRecord } from '../models/trade'
 import type { Cart } from '../models/trade'
 import type { Coupon, UserCoupon, SeckillProduct, Banner } from '../models/marketing'
 import type { User, UserAddress } from '../models/user'
@@ -11,6 +19,8 @@ export type ProductWithRelations = Product & {
   brand?: Brand | null
   skus?: ProductSku[]
   imageList?: ProductImage[]
+  /** 商品参数（产地/保质期等），后台维护、客户端详情页展示 */
+  attributes?: ProductAttribute[]
 }
 
 function num(value: unknown): number {
@@ -62,6 +72,10 @@ export function toProductDto(product: ProductWithRelations) {
     avgScore: num(product.avgScore),
     isRecommend: Boolean(product.isRecommend),
     tags: deriveTags(product),
+    attributes: (product.attributes ?? []).map((a) => ({
+      name: a.name,
+      value: a.value,
+    })),
     categoryName: category?.name ?? '',
     brandName: product.brand?.name ?? '',
     topCategoryId: topCategory ? num(topCategory.id) : num(product.categoryId),
@@ -129,6 +143,10 @@ export function toUserDto(user: User & { level?: { name: string } | null }) {
     levelName: user.level?.name ?? '普通会员',
     points: user.points,
     totalSpent: num(user.totalSpent),
+    /** 账户余额（U-30） */
+    balance: num(user.balance),
+    /** 是否已设置支付密码（U-45） */
+    hasPayPassword: Boolean(user.payPassword),
   }
 }
 
@@ -237,12 +255,20 @@ export function toOrderItemDto(item: OrderItem) {
     seckill: Boolean(item.seckillProductId),
     quantity: item.quantity,
     subtotal: num(item.subtotal),
+    /** 满赠赠品（U-62） */
+    isGift: Boolean(item.isGift),
     isCommented: Boolean(item.isCommented),
   }
 }
 
 export function toOrderDto(
-  order: Order & { items?: OrderItem[]; logistics?: OrderLogistics | null; logs?: OrderLog[] },
+  order: Order & {
+    items?: OrderItem[]
+    logistics?: OrderLogistics | null
+    logs?: OrderLog[]
+    invoice?: Invoice | null
+    payments?: PaymentRecord[]
+  },
 ) {
   return {
     orderNo: order.orderNo,
@@ -254,6 +280,9 @@ export function toOrderDto(
     seckillAmount: num(order.seckillAmount),
     promotionAmount: num(order.promotionAmount),
     couponAmount: num(order.couponAmount),
+    /** 积分抵现快照（U-64） */
+    pointsUsed: order.pointsUsed ?? 0,
+    pointsAmount: num(order.pointsAmount),
     freightAmount: num(order.freightAmount),
     payAmount: num(order.payAmount),
     receiverName: order.receiverName ?? '',
@@ -267,6 +296,34 @@ export function toOrderDto(
     remindShipCount: order.remindShipCount ?? 0,
     lastRemindShipAt: order.lastRemindShipAt ? formatDate(order.lastRemindShipAt) : null,
     remark: order.remark ?? '',
+    /** 后台异常标记（A-23） */
+    isAbnormal: Boolean(order.isAbnormal),
+    abnormalReason: order.abnormalReason ?? '',
+    /** 发票信息（下单时用户选择，未选择则为 null） */
+    invoice: order.invoice
+      ? {
+          type: order.invoice.type,
+          title: order.invoice.title,
+          taxNo: order.invoice.taxNo ?? '',
+          email: order.invoice.email ?? '',
+          content: order.invoice.content ?? '',
+          status: order.invoice.status,
+        }
+      : null,
+    /** 支付流水（A-21：后台订单详情展示，取最新一笔） */
+    payment: (() => {
+      const list = order.payments ?? []
+      if (!list.length) return null
+      const latest = [...list].sort((a, b) => Number(b.id) - Number(a.id))[0]
+      return {
+        payNo: latest.payNo,
+        channel: latest.channel,
+        status: latest.status,
+        amount: num(latest.amount),
+        thirdPartyNo: latest.thirdPartyNo ?? '',
+        paidAt: latest.paidAt ? formatDate(latest.paidAt) : null,
+      }
+    })(),
     createdAt: formatDate(order.createdAt),
     /** 订单操作日志时间轴（仅详情查询返回） */
     logs: (order.logs ?? []).map((log) => ({
