@@ -19,6 +19,7 @@ import * as inventory from '../../controllers/admin/inventoryController'
 import * as setting from '../../controllers/admin/settingController'
 import * as feedback from '../../controllers/admin/feedbackController'
 import * as homeFloor from '../../controllers/admin/homeFloorController'
+import * as ai from '../../controllers/admin/aiController'
 
 const router = Router()
 
@@ -178,6 +179,12 @@ router.put('/finance/invoices/:id', requirePermission('finance:view'), finance.s
 router.get('/feedbacks', requirePermission('feedback:view'), feedback.list)
 router.put('/feedbacks/:id/reply', requirePermission('feedback:update'), feedback.reply)
 router.put('/feedbacks/:id/close', requirePermission('feedback:update'), feedback.close)
+
+/* AI 智能客服 */
+router.get('/ai/conversations', requirePermission('ai:view'), ai.conversations)
+router.get('/ai/conversations/:id/messages', requirePermission('ai:view'), ai.messages)
+router.get('/ai/usage', requirePermission('ai:view'), ai.usage)
+router.post('/ai/knowledge/rebuild', requirePermission('ai:manage'), ai.rebuild)
 
 /* 系统配置 */
 router.get('/settings', requirePermission('system:view'), setting.list)

@@ -1,4 +1,4 @@
-import type { Address, CartItem, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, LoginLogItem, MyComment, MyComments, MyPoints, MyWallet, RechargePayload, RechargeStatusResult, BalanceLog, BalanceRecharge, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, RebuyResult, Refund, RebuySkippedItem, RemindShipResult } from '../types'
+import type { Address, CartItem, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, LoginLogItem, MyComment, MyComments, MyPoints, MyWallet, RechargePayload, RechargeStatusResult, BalanceLog, BalanceRecharge, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, RebuyResult, Refund, RebuySkippedItem, RemindShipResult, AiChatDonePayload, AiChatMessage, AiCitation, AiConfig, AiConversationItem } from '../types'
 import type {
   AddressPayload,
   ApplyRefundPayload,
@@ -66,7 +66,55 @@ const payRecords = new Map<string, { orderNo: string; channel: number }>()
 const rechargePrepay = new Map<string, { amount: number; channel: number }>()
 const remindRecords = new Map<string, number>()
 let refunds: Refund[] = []
+let feedbacks: FeedbackItem[] = []
 let walletBalance = demoUser.balance ?? 0
+
+/* ------------------------------ AI 客服（演示） ------------------------------ */
+
+let aiConversationSeq = 0
+let aiMessages: AiChatMessage[] = []
+const aiConversations: AiConversationItem[] = []
+
+function citation(title: string, snippet: string): AiCitation {
+  return { sourceType: 'policy', sourceId: null, title, snippet }
+}
+
+function mockAiAnswer(question: string): { text: string; citations: AiCitation[] } {
+  if (/物流|快递|到哪|签收/.test(question)) {
+    return {
+      text: '（演示模式）物流信息以订单详情的「查看物流」为准。已发货订单一般 24 小时内更新轨迹；超过 48 小时没有揽收记录，可以在订单详情点「提醒发货」，或转人工催件。',
+      citations: [citation('平台规则：发货时效', '发货后物流轨迹通常在 24 小时内更新；超过 48 小时没有揽收记录，可提醒发货或联系人工客服。')],
+    }
+  }
+  if (/退|售后|换货/.test(question)) {
+    return {
+      text: '（演示模式）在订单详情点「申请售后」，选择仅退款 / 退货退款 / 换货，填写原因并上传凭证。签收后 7 天内支持无理由退货，商品需完好；质量问题由平台承担运费。退款结果以客服审核为准。',
+      citations: [citation('平台规则：退换货政策', '签收后 7 天内支持无理由退货，商品需保持完好、配件齐全、不影响二次销售。')],
+    }
+  }
+  if (/发票/.test(question)) {
+    return {
+      text: '（演示模式）订单完成后可在订单详情申请电子发票，填写抬头、税号与邮箱，一般 1-3 个工作日开具；专票请联系人工客服。',
+      citations: [citation('平台规则：发票开具', '订单完成后可申请电子普通发票，一般 1-3 个工作日开具；专票需联系人工客服。')],
+    }
+  }
+  if (/券|满减|秒杀|积分/.test(question)) {
+    return {
+      text: '（演示模式）优惠券在「个人中心 → 我的优惠券」查看，结算页会自动推荐可用券；秒杀商品不参与满减。100 积分可抵 1 元，单笔最多抵扣应付金额的 50%。',
+      citations: [citation('平台规则：积分与优惠券', '100 积分抵 1 元，单笔订单最多抵扣应付金额的 50%；秒杀商品不参与满减。')],
+    }
+  }
+  if (/发货|多久|什么时候/.test(question)) {
+    return {
+      text: '（演示模式）现货商品付款后 48 小时内发出，大促期间可能顺延 1-2 天；发货后物流轨迹约 24 小时内更新。',
+      citations: [citation('平台规则：发货时效', '现货商品在付款成功后 48 小时内发出，大促与预售商品以商品页标注为准。')],
+    }
+  }
+  return {
+    text: '（演示模式）这个问题我暂时没有查到准确信息。你可以补充订单号或具体商品，我再帮你查；也可以点「转人工」由客服跟进。',
+    citations: [],
+  }
+}
 let balanceLogs: BalanceLog[] = []
 let rechargeRecords: BalanceRecharge[] = []
 
@@ -679,24 +727,30 @@ export const mockApi: ClientApi = {
   },
 
   feedbackApi: {
-    create: (payload: CreateFeedbackPayload): Promise<FeedbackItem> =>
-      delay({
+    create: async (payload: CreateFeedbackPayload): Promise<FeedbackItem> => {
+      await delay(null)
+      const item: FeedbackItem = {
         id: Date.now(),
         userId: 1,
         nickname: '小兔用户',
         avatar: '',
         type: payload.type,
         content: payload.content,
-        images: payload.images ?? [],
+        images: [...(payload.images ?? [])],
         contact: payload.contact ?? '',
         orderNo: payload.orderNo ?? '',
         status: 0,
         replyContent: '',
         replyAt: null,
         replier: '',
-        createdAt: '',
-      }),
-    mine: (): Promise<FeedbackItem[]> => delay([]),
+        createdAt: formatMockTime(Date.now()),
+      }
+      feedbacks = [item, ...feedbacks]
+      return item
+    },
+    mine: (orderNo?: string) =>
+      delay(orderNo ? feedbacks.filter((f) => f.orderNo === orderNo) : [...feedbacks]),
+    uploadImage: (file: File) => delay({ url: URL.createObjectURL(file) }),
   },
 
   configApi: {
@@ -723,5 +777,85 @@ export const mockApi: ClientApi = {
       const found = mockNotices.find((n) => n.id === id)
       return found ? delay(found) : rejectWith('公告不存在')
     },
+  },
+
+  aiApi: {
+    config: (): Promise<AiConfig> =>
+      delay({
+        enabled: true,
+        mode: 'mock',
+        model: 'mock-customer-service',
+        usingFallback: false,
+        welcome: '你好，我是小兔鲜 AI 客服（演示模式）。订单、物流、退换货、发票都可以问我。',
+        quickQuestions: ['我的订单什么时候发货？', '帮我查一下物流到哪了', '想退货，流程是怎样的？', '怎么开发票？'],
+        disclaimer: '演示模式回答为内置话术；配置 DEEPSEEK_API_KEY 后由 DeepSeek 生成。',
+      }),
+
+    async chat(payload, handlers) {
+      const conversationId = payload.conversationId ?? (aiConversationSeq += 1)
+      handlers?.onMeta?.({ conversationId })
+
+      if (/订单|物流|快递/.test(payload.message)) {
+        handlers?.onThinking?.('正在查询你的订单信息…')
+        await delay(null, 120)
+        handlers?.onTool?.({ name: 'get_order_detail', label: '已查询订单（演示数据）' })
+      }
+
+      const { text, citations } = mockAiAnswer(payload.message)
+      for (const chunk of text.match(/[\s\S]{1,16}/g) ?? [text]) {
+        await delay(null, 25)
+        handlers?.onDelta?.(chunk)
+      }
+
+      const done: AiChatDonePayload = {
+        conversationId,
+        messageId: Date.now(),
+        content: text,
+        citations,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        grounded: citations.length > 0,
+        mode: 'mock',
+      }
+      handlers?.onDone?.(done)
+
+      aiMessages.push(
+        { id: Date.now(), role: 'user', content: payload.message, citations: [], createdAt: '' },
+        { id: Date.now() + 1, role: 'assistant', content: text, citations, createdAt: '' },
+      )
+      const existing = aiConversations.find((item) => item.id === conversationId)
+      if (existing) {
+        existing.messageCount += 2
+        existing.lastMessage = text.slice(0, 120)
+        existing.lastMessageAt = '刚刚'
+      } else {
+        aiConversations.unshift({
+          id: conversationId,
+          orderNo: payload.orderNo ?? '',
+          title: payload.message.slice(0, 30),
+          status: 1,
+          messageCount: 2,
+          lastMessage: text.slice(0, 120),
+          lastMessageAt: '刚刚',
+          createdAt: '刚刚',
+        })
+      }
+
+      return {
+        conversationId,
+        messageId: done.messageId,
+        content: text,
+        citations,
+        usage: done.usage,
+        mode: 'mock' as const,
+      }
+    },
+
+    conversations: (orderNo?: string) =>
+      delay(orderNo ? aiConversations.filter((item) => item.orderNo === orderNo) : [...aiConversations]),
+
+    messages: () => delay([...aiMessages]),
+
+    transfer: (conversationId: number) =>
+      delay({ feedbackId: Date.now(), conversationId }),
   },
 }

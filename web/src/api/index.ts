@@ -12,7 +12,7 @@ export const useMock = import.meta.env.VITE_USE_MOCK !== 'false'
 
 const api: ClientApi = useMock ? mockApi : realApi
 
-export const { categoryApi, brandApi, productApi, homeApi, couponApi, orderApi, addressApi, userApi, cartApi, paymentApi, walletApi, refundApi, commentApi, pointsApi, promotionApi, contentApi, seckillApi, feedbackApi, configApi, noticeApi } = api
+export const { categoryApi, brandApi, productApi, homeApi, couponApi, orderApi, addressApi, userApi, cartApi, paymentApi, walletApi, refundApi, commentApi, pointsApi, promotionApi, contentApi, seckillApi, feedbackApi, configApi, noticeApi, aiApi } = api
 
 export type {
   ClientApi,

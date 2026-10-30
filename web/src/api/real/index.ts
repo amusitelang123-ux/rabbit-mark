@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, LoginLogItem, MyComment, MyComments, MyPoints, MyWallet, RechargeStatusResult, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, RebuyResult, RemindShipResult, UserInfo, Notice } from '../types'
+import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, LoginLogItem, MyComment, MyComments, MyPoints, MyWallet, RechargeStatusResult, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, RebuyResult, RemindShipResult, UserInfo, Notice, AiChatDonePayload, AiChatMessage, AiConfig, AiConversationItem, AiUsage } from '../types'
 import type {
   AddressPayload,
   CartAddPayload,
@@ -167,7 +167,8 @@ export const realApi: ClientApi = {
 
   feedbackApi: {
     create: (payload) => http.post<FeedbackItem>('/feedbacks', payload),
-    mine: () => http.get<FeedbackItem[]>('/feedbacks'),
+    mine: (orderNo) => http.get<FeedbackItem[]>('/feedbacks', orderNo ? { orderNo } : undefined),
+    uploadImage: (file) => http.upload<{ url: string }>('/feedbacks/images', file),
   },
 
   configApi: {
@@ -177,5 +178,107 @@ export const realApi: ClientApi = {
   noticeApi: {
     list: (limit) => http.get<Notice[]>('/notices', { limit }),
     detail: (id) => http.get<Notice>(`/notices/${id}`),
+  },
+
+  aiApi: {
+    config: () => http.get<AiConfig>('/ai/config'),
+
+    async chat(payload, handlers) {
+      // 用对象承接回调里的状态，避免 TS 把闭包赋值当成 null 收窄
+      const state: {
+        done: AiChatDonePayload | null
+        error: string | null
+        content: string
+        conversationId: number
+      } = {
+        done: null,
+        error: null,
+        content: '',
+        conversationId: payload.conversationId ?? 0,
+      }
+
+      await http.stream(
+        '/ai/chat',
+        {
+          message: payload.message,
+          conversationId: payload.conversationId,
+          orderNo: payload.orderNo,
+        },
+        {
+          signal: payload.signal,
+          onEvent: (event, data) => {
+            const record = (data ?? {}) as Record<string, unknown>
+            switch (event) {
+              case 'meta': {
+                const id = Number(record.conversationId ?? 0)
+                if (id) {
+                  state.conversationId = id
+                  handlers?.onMeta?.({ conversationId: id })
+                }
+                break
+              }
+              case 'thinking':
+                handlers?.onThinking?.(String(record.text ?? ''))
+                break
+              case 'delta': {
+                const text = String(record.text ?? '')
+                state.content += text
+                handlers?.onDelta?.(text)
+                break
+              }
+              case 'tool':
+                handlers?.onTool?.({
+                  name: String(record.name ?? ''),
+                  label: String(record.label ?? ''),
+                })
+                break
+              case 'done': {
+                const done = data as AiChatDonePayload
+                state.done = done
+                state.conversationId = done.conversationId
+                handlers?.onDone?.(done)
+                break
+              }
+              case 'error': {
+                const message = String(record.message ?? 'AI 客服暂时不可用')
+                state.error = message
+                handlers?.onError?.(message)
+                break
+              }
+              default:
+                break
+            }
+          },
+        },
+      )
+
+      if (state.error) throw new Error(state.error)
+
+      const usage: AiUsage = state.done?.usage ?? {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      }
+      return {
+        conversationId: state.done?.conversationId ?? state.conversationId,
+        messageId: state.done?.messageId ?? 0,
+        content: state.done?.content ?? state.content,
+        citations: state.done?.citations ?? [],
+        usage,
+        mode: state.done?.mode ?? 'mock',
+      }
+    },
+
+    conversations: (orderNo) =>
+      http.get<AiConversationItem[]>('/ai/conversations', orderNo ? { orderNo } : undefined),
+
+    messages: (conversationId) =>
+      http.get<AiChatMessage[]>(`/ai/conversations/${conversationId}/messages`),
+
+    transfer: (conversationId, note) =>
+      http.post<{ feedbackId: number; conversationId: number }>(
+        `/ai/conversations/${conversationId}/transfer`,
+        { note },
+      ),
   },
 }

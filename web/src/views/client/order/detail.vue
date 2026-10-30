@@ -10,6 +10,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PriceTag from '@/components/PriceTag.vue'
 import CommentDialog from './components/CommentDialog.vue'
+import ContactServiceDialog from './components/ContactServiceDialog.vue'
 import LogisticsDialog from './components/LogisticsDialog.vue'
 import PayDialog from './components/PayDialog.vue'
 import { formatMoney } from '@/utils/money'
@@ -25,6 +26,8 @@ const payVisible = ref(false)
 
 const logisticsVisible = ref(false)
 const logisticsOrderNo = ref('')
+
+const contactVisible = ref(false)
 
 const commentVisible = ref(false)
 const commentTarget = ref<OrderItem | null>(null)
@@ -124,6 +127,11 @@ function openLogistics() {
   if (!order.value) return
   logisticsOrderNo.value = order.value.orderNo
   logisticsVisible.value = true
+}
+
+function openContact() {
+  if (!order.value) return
+  contactVisible.value = true
 }
 
 function openComment(item: OrderItem) {
@@ -322,7 +330,7 @@ onMounted(async () => {
             </template>
 
             <button v-if="canRefund" class="btn btn-secondary btn-sm" @click="openRefund">申请售后</button>
-            <button class="btn btn-secondary btn-sm" @click="ui.toast('联系客服（演示）', 'info')">联系客服</button>
+            <button class="btn btn-secondary btn-sm" @click="openContact">联系客服</button>
           </div>
         </div>
 
@@ -447,6 +455,8 @@ onMounted(async () => {
         />
 
         <LogisticsDialog v-model="logisticsVisible" :order-no="logisticsOrderNo" />
+
+        <ContactServiceDialog v-model="contactVisible" :order="order" />
 
         <ConfirmDialog
           v-model="deleteVisible"

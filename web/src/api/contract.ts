@@ -34,6 +34,12 @@ import type {
   SeckillProduct,
   UserInfo,
   Notice,
+  AiChatMessage,
+  AiChatPayload,
+  AiChatResult,
+  AiConfig,
+  AiConversationItem,
+  AiStreamHandlers,
 } from './types'
 
 export interface ProductQuery {
@@ -246,7 +252,10 @@ export interface ClientApi {
   }
   feedbackApi: {
     create(payload: CreateFeedbackPayload): Promise<FeedbackItem>
-    mine(): Promise<FeedbackItem[]>
+    /** 我的留言；传 orderNo 时只返回该订单相关的留言 */
+    mine(orderNo?: string): Promise<FeedbackItem[]>
+    /** 留言凭证上传（单张，最大 5MB） */
+    uploadImage(file: File): Promise<{ url: string }>
   }
   configApi: {
     public(): Promise<PublicConfig>
@@ -256,6 +265,18 @@ export interface ClientApi {
     list(limit?: number): Promise<Notice[]>
     /** 公告详情；不存在或未启用时后端返回 404，前端表现为 reject */
     detail(id: number): Promise<Notice>
+  }
+  aiApi: {
+    /** AI 能力开关、模式与欢迎语（公开） */
+    config(): Promise<AiConfig>
+    /** 对话：默认 SSE 流式，逐段回调；返回最终完整结果 */
+    chat(payload: AiChatPayload, handlers?: AiStreamHandlers): Promise<AiChatResult>
+    /** 我的会话列表；传 orderNo 时只返回该订单的会话 */
+    conversations(orderNo?: string): Promise<AiConversationItem[]>
+    /** 历史消息，用于弹窗重开时恢复上下文 */
+    messages(conversationId: number): Promise<AiChatMessage[]>
+    /** 转人工：把最近对话摘要写成留言工单 */
+    transfer(conversationId: number, note?: string): Promise<{ feedbackId: number; conversationId: number }>
   }
 }
 

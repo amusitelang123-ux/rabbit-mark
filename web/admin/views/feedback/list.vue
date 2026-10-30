@@ -196,6 +196,19 @@ onMounted(load)
           <el-descriptions-item label="联系方式" :span="2">{{ detailDialog.data.contact || '—' }}</el-descriptions-item>
           <el-descriptions-item label="关联订单" :span="2">{{ detailDialog.data.orderNo || '—' }}</el-descriptions-item>
           <el-descriptions-item label="留言内容" :span="2">{{ detailDialog.data.content }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailDialog.data.images?.length" label="凭证图片" :span="2">
+            <div class="fb-images">
+              <el-image
+                v-for="(img, index) in detailDialog.data.images"
+                :key="`${detailDialog.data.id}-${index}`"
+                :src="img"
+                :preview-src-list="detailDialog.data.images"
+                :initial-index="index"
+                fit="cover"
+                preview-teleported
+              />
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item v-if="detailDialog.data.replyContent" label="官方回复" :span="2">
             {{ detailDialog.data.replyContent }}
             <p class="muted">{{ detailDialog.data.replier }} · {{ detailDialog.data.replyAt }}</p>
@@ -245,5 +258,18 @@ onMounted(load)
   border-radius: 6px;
   padding: 8px 12px;
   margin-bottom: 12px;
+}
+.fb-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fb-images .el-image {
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e7e9ec;
+  cursor: zoom-in;
 }
 </style>

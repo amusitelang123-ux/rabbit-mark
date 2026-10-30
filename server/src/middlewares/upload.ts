@@ -49,6 +49,9 @@ export const commentUpload = buildUploader('comments', 5 * 1024 * 1024)
 /** 售后凭证上传：字段名 file，单文件，最大 5MB */
 export const refundUpload = buildUploader('refunds', 5 * 1024 * 1024)
 
+/** 客服留言凭证上传：字段名 file，单文件，最大 5MB */
+export const feedbackUpload = buildUploader('feedbacks', 5 * 1024 * 1024)
+
 /** 将上传文件名拼接为可访问 URL */
 export function toUploadUrl(subDir: string, filename: string): string {
   return `${config.upload.baseUrl.replace(/\/$/, '')}/${subDir}/${filename}`

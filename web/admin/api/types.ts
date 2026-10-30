@@ -676,4 +676,64 @@ export interface AdminSetting {
   updatedAt: string
 }
 
+/* ------------------------------ AI 客服 ------------------------------ */
+
+export interface AdminAiConversation {
+  id: number
+  userId: number | null
+  nickname: string
+  phone: string
+  orderNo: string
+  title: string
+  status: number
+  messageCount: number
+  lastMessage: string
+  lastMessageAt: string | null
+  createdAt: string
+}
+
+export interface AdminAiCitation {
+  sourceType: string
+  sourceId: number | null
+  title: string
+  snippet: string
+}
+
+export interface AdminAiMessage {
+  id: number
+  role: string
+  content: string
+  citations: AdminAiCitation[]
+  toolCalls: { name: string; arguments: string; result?: unknown }[]
+  tokens: number
+  model: string
+  latencyMs: number
+  createdAt: string
+}
+
+export interface AdminAiUsageBucket {
+  calls: number
+  tokens: number
+  cost: number
+  avgLatency: number
+  failures: number
+}
+
+export interface AdminAiUsage {
+  mode: 'deepseek' | 'mock'
+  model: string
+  usingFallback: boolean
+  today: AdminAiUsageBucket
+  week: AdminAiUsageBucket
+  totals: { conversations: number; messages: number; knowledgeChunks: number }
+  knowledgeIndexedAt: string | null
+  daily: { date: string; calls: number; tokens: number; cost: number }[]
+}
+
+export interface AdminAiKnowledgeSync {
+  total: number
+  byType: Record<string, number>
+  syncedAt: string
+}
+
 export type { Order }
