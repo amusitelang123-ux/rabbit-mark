@@ -87,7 +87,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="container">
-      <!-- Overlapping promo cards -->
+      <!-- Promo cards (kept clear of the hero banner) -->
       <section class="promos">
         <div class="promo">
           <h3>新人专享</h3>
@@ -290,7 +290,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 18px;
-  margin-top: -70px;
+  margin-top: 24px;
   position: relative;
   z-index: 5;
 }
