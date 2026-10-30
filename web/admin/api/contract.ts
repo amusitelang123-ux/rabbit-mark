@@ -1,5 +1,9 @@
 import type { PageResult } from '@/api/types'
 import type {
+  AdminAiConversation,
+  AdminAiKnowledgeSync,
+  AdminAiMessage,
+  AdminAiUsage,
   AdminBanner,
   AdminBrand,
   AdminCategoryNode,
@@ -226,6 +230,18 @@ export interface AdminApi {
     }): Promise<PageResult<AdminFeedback>>
     reply(id: number, content: string): Promise<AdminFeedback>
     close(id: number): Promise<{ id: number; status: number }>
+  }
+  aiApi: {
+    conversations(query?: {
+      keyword?: string
+      status?: number
+      page?: number
+      pageSize?: number
+    }): Promise<PageResult<AdminAiConversation>>
+    messages(id: number): Promise<AdminAiMessage[]>
+    usage(): Promise<AdminAiUsage>
+    /** 重建知识库（FAQ / 公告 / 物流 / 运费 / 平台规则） */
+    rebuild(): Promise<AdminAiKnowledgeSync>
   }
   settingApi: {
     list(): Promise<AdminSetting[]>

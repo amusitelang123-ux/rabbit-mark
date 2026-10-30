@@ -7,6 +7,10 @@ const SCHEMA_FILE = path.join(__dirname, '..', 'sql', 'xtx_mall.schema.sql')
 
 /** 逆依赖顺序删除，避免外键约束报错 */
 const DROP_ORDER = [
+  'ai_call_logs',
+  'ai_kb_chunks',
+  'ai_messages',
+  'ai_conversations',
   'feedbacks',
   'settings',
   'order_logs',

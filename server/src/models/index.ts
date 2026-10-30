@@ -54,6 +54,7 @@ import {
 } from './content'
 import { StatDaily } from './stat'
 import { BalanceLog, BalanceRecharge } from './wallet'
+import { AiCallLog, AiConversation, AiKbChunk, AiMessage } from './ai'
 
 /* ------------------------------ Associations ------------------------------ */
 
@@ -152,6 +153,11 @@ AdminUser.hasMany(AdminLog, { foreignKey: 'adminId', as: 'logs' })
 AdminLog.belongsTo(AdminUser, { foreignKey: 'adminId', as: 'admin' })
 Feedback.belongsTo(User, { foreignKey: 'userId', as: 'user' })
 
+AiConversation.belongsTo(User, { foreignKey: 'userId', as: 'user' })
+User.hasMany(AiConversation, { foreignKey: 'userId', as: 'aiConversations' })
+AiConversation.hasMany(AiMessage, { foreignKey: 'conversationId', as: 'messages' })
+AiMessage.belongsTo(AiConversation, { foreignKey: 'conversationId', as: 'conversation' })
+
 HomeFloor.hasMany(HomeFloorProduct, { foreignKey: 'floorId', as: 'items' })
 HomeFloorProduct.belongsTo(HomeFloor, { foreignKey: 'floorId', as: 'floor' })
 HomeFloorProduct.belongsTo(Product, { foreignKey: 'productId', as: 'product' })
@@ -208,4 +214,8 @@ export {
   HomeFloor,
   HomeFloorProduct,
   StatDaily,
+  AiConversation,
+  AiMessage,
+  AiKbChunk,
+  AiCallLog,
 }

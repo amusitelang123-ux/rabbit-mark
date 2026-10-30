@@ -29,6 +29,7 @@ export const adminMenu: AdminMenuItem[] = [
   { path: '/admin/orders', title: '订单管理', icon: 'List', perm: 'order:view' },
   { path: '/admin/refunds', title: '售后管理', icon: 'RefreshLeft', perm: 'refund:view' },
   { path: '/admin/feedbacks', title: '留言工单', icon: 'ChatLineSquare', perm: 'feedback:view' },
+  { path: '/admin/ai', title: 'AI 客服', icon: 'MagicStick', perm: 'ai:view' },
   { path: '/admin/marketing', title: '营销管理', icon: 'Ticket', perm: 'marketing:view' },
   { path: '/admin/home-floors', title: '首页推荐位', icon: 'House', perm: 'marketing:view' },
   { path: '/admin/finance', title: '财务管理', icon: 'Money', perm: 'finance:view' },
@@ -158,6 +159,12 @@ export const adminRouteRegistry: RouteRecordRaw[] = [
     name: 'admin-feedbacks',
     component: () => import('@admin/views/feedback/list.vue'),
     meta: { title: '留言工单', icon: 'ChatLineSquare', perm: 'feedback:view' },
+  },
+  {
+    path: 'ai',
+    name: 'admin-ai',
+    component: () => import('@admin/views/ai/index.vue'),
+    meta: { title: 'AI 客服', icon: 'MagicStick', perm: 'ai:view' },
   },
   {
     path: 'system/logs',

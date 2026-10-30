@@ -2,6 +2,10 @@ import type { PageResult } from '@/api/types'
 import { adminDownload, adminHttp } from './request'
 import type { AdminApi } from './contract'
 import type {
+  AdminAiConversation,
+  AdminAiKnowledgeSync,
+  AdminAiMessage,
+  AdminAiUsage,
   AdminBanner,
   AdminBrand,
   AdminCategoryNode,
@@ -277,6 +281,14 @@ export const adminApi: AdminApi = {
     setInvoiceStatus: (id, status) =>
       adminHttp.put<{ id: number; status: number }>(`/finance/invoices/${id}`, { status }),
     report: (year) => adminHttp.get<FinanceReport>('/finance/report', { year }),
+  },
+
+  aiApi: {
+    conversations: (query = {}) =>
+      adminHttp.get<PageResult<AdminAiConversation>>('/ai/conversations', paramsOf(query)),
+    messages: (id) => adminHttp.get<AdminAiMessage[]>(`/ai/conversations/${id}/messages`),
+    usage: () => adminHttp.get<AdminAiUsage>('/ai/usage'),
+    rebuild: () => adminHttp.post<AdminAiKnowledgeSync>('/ai/knowledge/rebuild'),
   },
 }
 

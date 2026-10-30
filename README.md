@@ -3,7 +3,8 @@
 平台自营式 B2C 电商系统。业务链路：**商品 → 购物车 → 订单 → 支付 → 发货 → 售后**。
 
 - 开发企划书：`docs/小兔鲜电商-开发企划.md`
-- 当前进度：用户端页面 + 用户端完整 API + 后台管理端（独立应用）+ MySQL 库表
+- AI 客服设计说明：`docs/AI智能客服-实现说明.md`
+- 当前进度：用户端页面 + 用户端完整 API + 后台管理端（独立应用）+ MySQL 库表 + AI 智能客服（DeepSeek，可离线降级）
 
 ## 技术栈
 
@@ -13,6 +14,7 @@
 | 后端 | Node.js 20+ + Express 4 + TypeScript + Sequelize 6 |
 | 数据库 | MySQL 8.0（InnoDB / utf8mb4） |
 | 鉴权 | JWT（access + refresh 双 Token） |
+| AI | DeepSeek（OpenAI 兼容协议；`mock` 适配器可离线演示） |
 
 ## 目录结构
 
@@ -169,6 +171,10 @@ VITE_USE_MOCK=true
 | `UPLOAD_DIR` | `./uploads` | 本地图片目录 |
 | `PAY_ADAPTER` | `sandbox` | 支付适配器（沙箱） |
 | `CORS_ORIGIN` | `http://localhost:5173` | 允许的前端来源 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥；**留空自动降级为演示模式** |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | 对话模型（可换 `deepseek-reasoner`） |
+| `AI_ADAPTER` | `deepseek` | `deepseek` / `mock` |
+| `AI_DAILY_BUDGET_CNY` | `20` | 每日成本上限，超出后停止调用并引导转人工 |
 
 ## 常用脚本
 
@@ -220,6 +226,7 @@ VITE_USE_MOCK=true
 | 评价 | `GET /api/client/v1/user/comments`、`POST /comments`、`POST /comments/images`（晒单图上传） |
 | 优惠券 | `GET /api/client/v1/coupons/center`、`POST /coupons/:id/receive` |
 | 公告 | `GET /api/client/v1/notices`、`/notices/:id` |
+| AI 客服 | `GET /ai/config`、`POST /ai/chat`（SSE 流式）、`GET /ai/conversations`、`GET /ai/conversations/:id/messages`、`POST /ai/conversations/:id/transfer` |
 
 > 订单删除遵循企划 4.1「订单类不删除只置状态」：`DELETE /orders/:orderNo` 仅置 `orders.user_deleted=1` 做用户侧隐藏，订单、支付与财务记录全部保留，后台订单管理仍可查询。
 >
@@ -228,6 +235,50 @@ VITE_USE_MOCK=true
 > 余额支付（U-30）：用户端「个人中心 → 我的钱包」可充值，收银台余额不足时会引导充值；充值单独立于订单支付单，回调成功后入账并写入余额流水（充值 / 余额支付 / 售后退款 / 后台调账）。
 
 数据库设计详见 `server/database/sql/xtx_mall.schema.sql`。
+
+## AI 智能客服（DeepSeek）
+
+用户端有两个入口：
+
+- **订单详情 → 联系客服 → AI 客服**：自动带上当前订单，可直接问物流/发货
+- **帮助中心 → AI 客服**：可选择要咨询的订单，也可以选择「不选择订单」咨询退换货、发票等通用问题
+
+回答基于两层数据：
+
+- **知识库**：`faqs`、`notices`、`logistics_companies`、`freight_templates`，以及 `server/src/services/aiPolicies.ts` 中的平台规则（发货、退换货、退款、运费、发票、积分、账户安全）
+- **订单数据**：通过 function calling 调用 `get_order_detail` / `get_order_logistics`，**只能查询当前登录用户自己的订单**
+
+### 配置 Key（位置已预留）
+
+打开 `server/.env`，填这一行即可：
+
+```env
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
+```
+
+- 留空也能跑：自动降级为 `mock` 适配器，页面显示「演示模式」，功能链路完整但回答是内置话术
+- 改完重启后端（`npm run dev`）生效
+- 密钥只从环境变量读取，不落库、不进日志；`.env` 已在 `.gitignore` 中
+
+### 能力与边界
+
+- SSE 流式输出，支持「停止生成」；「转人工」会把最近对话摘要写成 `feedbacks` 工单，进入现有客服处理流
+- 会话按订单隔离：选择订单进入该订单的会话，不选订单则进入通用会话，互不串台
+- 回答写入 `ai_messages`，知识引用 `[1]`/`[2]` 可追溯；调用 token、耗时、成本写入 `ai_call_logs`
+- **AI 不参与金额计算、库存扣减与订单状态流转**；退款/赔付类只复述规则，结果以人工审核为准
+- 单用户 12 次/分钟限流；`AI_DAILY_BUDGET_CNY` 超限后自动停止调用并提示转人工
+
+### 后台
+
+「AI 客服」菜单（`/admin/ai`，权限码 `ai:view` / `ai:manage`）可查看会话与消息、今日/近 7 天用量与成本，并**重建知识库**——改了 FAQ、公告、物流或运费模板后点一次即可生效。
+
+### 相关表与代码
+
+- 表：`ai_conversations` / `ai_messages` / `ai_kb_chunks` / `ai_call_logs`（迁移 `20261030000026-ai-customer-service.js`）
+- 适配器：`server/src/adapters/ai/`（`deepseek` + `mock`，与支付适配器同一套分层）
+- 编排：`server/src/services/aiChatService.ts`、`aiKnowledgeService.ts`、`aiPrompt.ts`
+
+> 首次升级到本版本需要执行 `npm run db:migrate` 建 AI 表，并执行一次 `npm run db:seed` 写入「AI 客服」菜单权限。
 
 ## 常见问题
 
@@ -242,6 +293,9 @@ VITE_USE_MOCK=true
 | 5173 打开 `/admin/login` 跳回首页 | 正常：后台管理端在 5174（`npm run dev:admin`），5173 只有用户端路由 |
 | 后台提示未登录 / 刚登录就掉线 | 后台 Token 存在 `http://localhost:5174` 这个源的 localStorage 下，换端口或换域名需要重新登录 |
 | 5174 启动报端口占用 | 关闭已在运行的 `dev:admin`，或改 `vite.admin.config.ts` 的 `server.port` |
+| AI 客服显示「演示模式」 | 正常：`server/.env` 的 `DEEPSEEK_API_KEY` 为空，填入后重启后端 |
+| AI 回答「额度已用完」 | 今日成本超过 `AI_DAILY_BUDGET_CNY`，可调大或次日再试 |
+| 后台看不到「AI 客服」菜单 | 执行 `npm run db:seed` 写入权限，并重新登录后台 |
 
 ## 说明
 

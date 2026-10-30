@@ -1,5 +1,5 @@
 import { Op, type WhereOptions } from 'sequelize'
-import { Feedback, User } from '../models'
+import { Feedback, Order, User } from '../models'
 import { AppError } from '../utils/errors'
 import { formatDate } from '../utils/serializers'
 
@@ -32,6 +32,12 @@ function toFeedbackDto(f: Feedback & { user?: User | null }) {
 
 /** 客户端提交工单 */
 export async function createFeedback(userId: number, input: CreateFeedbackInput) {
+  // 关联订单必须是当前用户的订单，避免留言挂到他人订单上
+  if (input.orderNo) {
+    const order = await Order.findOne({ where: { orderNo: input.orderNo, userId } })
+    if (!order) throw AppError.notFound('订单不存在')
+  }
+
   const feedback = await Feedback.create({
     userId,
     type: input.type,
@@ -44,9 +50,10 @@ export async function createFeedback(userId: number, input: CreateFeedbackInput)
   return toFeedbackDto(feedback as unknown as Feedback & { user?: User | null })
 }
 
-/** 客户端：我的工单 */
-export async function listMyFeedbacks(userId: number) {
-  const rows = await Feedback.findAll({ where: { userId }, order: [['id', 'DESC']], limit: 50 })
+/** 客户端：我的工单；传 orderNo 时只返回该订单相关的留言 */
+export async function listMyFeedbacks(userId: number, orderNo?: string) {
+  const where: WhereOptions = orderNo ? { userId, orderNo } : { userId }
+  const rows = await Feedback.findAll({ where, order: [['id', 'DESC']], limit: 50 })
   return rows.map((r) => toFeedbackDto(r as unknown as Feedback & { user?: User | null }))
 }
 

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { optionalAuth, requireAuth } from '../../middlewares/auth'
-import { avatarUpload, commentUpload, refundUpload } from '../../middlewares/upload'
+import { avatarUpload, commentUpload, feedbackUpload, refundUpload } from '../../middlewares/upload'
 import * as auth from '../../controllers/client/authController'
 import * as catalog from '../../controllers/client/catalogController'
 import * as user from '../../controllers/client/userController'
@@ -16,6 +16,7 @@ import * as seckill from '../../controllers/client/seckillController'
 import * as feedback from '../../controllers/client/feedbackController'
 import * as coupon from '../../controllers/client/couponController'
 import * as notice from '../../controllers/client/noticeController'
+import * as ai from '../../controllers/client/aiController'
 
 const router = Router()
 
@@ -107,6 +108,7 @@ router.get('/logistics-companies', content.logisticsCompanies)
 /* 留言工单 */
 router.post('/feedbacks', requireAuth, feedback.create)
 router.get('/feedbacks', requireAuth, feedback.mine)
+router.post('/feedbacks/images', requireAuth, feedbackUpload.single('file'), feedback.uploadImage)
 
 /* 公开配置 */
 router.get('/config', feedback.publicConfig)
@@ -120,5 +122,12 @@ router.get('/user/coupons', requireAuth, coupon.mine)
 /* 公告（只读） */
 router.get('/notices', notice.list)
 router.get('/notices/:id', notice.detail)
+
+/* AI 智能客服（方向一）：配置公开，对话与转人工需登录 */
+router.get('/ai/config', ai.config)
+router.post('/ai/chat', requireAuth, ai.chat)
+router.get('/ai/conversations', requireAuth, ai.conversations)
+router.get('/ai/conversations/:id/messages', requireAuth, ai.messages)
+router.post('/ai/conversations/:id/transfer', requireAuth, ai.transfer)
 
 export default router

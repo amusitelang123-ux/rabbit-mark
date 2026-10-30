@@ -1,13 +1,23 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { configApi, contentApi, feedbackApi } from '@/api'
-import type { FaqGroup, FeedbackItem, LogisticsCompanyItem, PublicConfig } from '@/api/types'
+import { useRouter } from 'vue-router'
+import { configApi, contentApi, feedbackApi, orderApi } from '@/api'
+import type {
+  AiOrderOption,
+  FaqGroup,
+  FeedbackItem,
+  LogisticsCompanyItem,
+  PublicConfig,
+} from '@/api/types'
+import AiChatPanel from '@/components/AiChatPanel.vue'
+import { ORDER_STATUS_TEXT } from '@/constants/order'
 import { useUserStore } from '@/stores/user'
 import { useUiStore } from '@/stores/ui'
 import EmptyState from '@/components/EmptyState.vue'
 
 const user = useUserStore()
 const ui = useUiStore()
+const router = useRouter()
 
 const loading = ref(true)
 const groups = ref<FaqGroup[]>([])
@@ -46,6 +56,51 @@ async function loadFeedbacks() {
 function switchTab(next: HelpTab) {
   tab.value = next
   if (next === 'feedback') loadFeedbacks()
+}
+
+/* -------------------------------- AI 客服 -------------------------------- */
+
+const aiOpen = ref(false)
+const aiOrderNo = ref('')
+const aiOrders = ref<AiOrderOption[]>([])
+const loadingOrders = ref(false)
+
+/** 最近 20 笔订单作为 AI 咨询的候选；不选订单则咨询通用问题 */
+async function loadAiOrders() {
+  if (!user.isLoggedIn) {
+    aiOrders.value = []
+    return
+  }
+  loadingOrders.value = true
+  try {
+    const page = await orderApi.list(undefined, 1, 20)
+    aiOrders.value = page.list.map((order) => ({
+      orderNo: order.orderNo,
+      statusText: ORDER_STATUS_TEXT[order.status] ?? '',
+      payAmount: order.payAmount,
+      itemCount: (order.items ?? []).reduce((sum, item) => sum + item.quantity, 0),
+    }))
+  } catch {
+    aiOrders.value = []
+  } finally {
+    loadingOrders.value = false
+  }
+}
+
+function openAi() {
+  if (!user.isLoggedIn) {
+    ui.toast('登录后即可使用 AI 客服', 'info')
+    router.push({ name: 'login', query: { redirect: '/help' } })
+    return
+  }
+  aiOpen.value = true
+  aiOrderNo.value = ''
+  void loadAiOrders()
+}
+
+function onAiTransferred() {
+  aiOpen.value = false
+  switchTab('feedback')
 }
 
 async function submitFeedback() {
@@ -106,6 +161,7 @@ onMounted(async () => {
           在线留言
           <span v-if="feedbacks.some((f) => f.status === 1)" class="help-tabs__dot" />
         </button>
+        <button class="help-tabs__ai" @click="openAi">AI 客服 · 在线</button>
       </div>
 
       <div v-if="tab === 'faq'" class="help-grid">
@@ -125,6 +181,19 @@ onMounted(async () => {
         </aside>
 
         <main class="help-main">
+          <section class="card help-ai">
+            <div class="help-ai__main">
+              <span class="help-ai__badge">AI</span>
+              <div>
+                <h2 class="help-ai__title">AI 客服 · 7×24 在线</h2>
+                <p class="muted">
+                  订单、物流、退换货、发票都能问；可以选择要咨询的订单，也可以不选订单直接问通用问题。
+                </p>
+              </div>
+            </div>
+            <button class="btn btn-primary" @click="openAi">立即咨询</button>
+          </section>
+
           <div v-if="loading" class="help-loading">正在加载…</div>
 
           <template v-else-if="groups.length">
@@ -239,6 +308,27 @@ onMounted(async () => {
             </li>
           </ul>
         </section>
+      </div>
+    </div>
+
+    <!-- AI 客服弹窗：可选订单，也可不选 -->
+    <div v-if="aiOpen" class="ai-mask" @click.self="aiOpen = false">
+      <div class="ai-modal card" role="dialog" aria-modal="true" aria-label="AI 客服">
+        <header class="ai-modal__head">
+          <div>
+            <h2>AI 客服</h2>
+            <p class="muted">可选择订单查询状态与物流，也可以不选订单咨询通用问题</p>
+          </div>
+          <button class="ai-modal__close" aria-label="关闭" @click="aiOpen = false">✕</button>
+        </header>
+        <p v-if="loadingOrders" class="muted ai-modal__loading">正在加载你的订单…</p>
+        <AiChatPanel
+          v-model:orderNo="aiOrderNo"
+          :orders="aiOrders"
+          show-order-picker
+          list-height="360px"
+          @transferred="onAiTransferred"
+        />
       </div>
     </div>
   </div>
@@ -571,6 +661,103 @@ onMounted(async () => {
   font-size: 12px;
 }
 
+/* ---- AI 客服入口 ---- */
+.help-tabs button.help-tabs__ai {
+  margin-left: auto;
+  border-color: var(--amz-orange);
+  background: linear-gradient(120deg, #fff8ec, #fff);
+  color: var(--amz-price);
+  font-weight: 700;
+}
+.help-ai {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 24px;
+  border: 1px solid #ffe0c2;
+  background: linear-gradient(120deg, #fff8ec, #fff);
+}
+.help-ai__main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.help-ai__badge {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff7a18, #ffb020);
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.help-ai__title {
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+.help-ai__main .muted {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* ---- AI 客服弹窗 ---- */
+.ai-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 2100;
+}
+.ai-modal {
+  width: 100%;
+  max-width: 640px;
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 0 0 16px;
+}
+.ai-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 8px;
+}
+.ai-modal__head h2 {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+.ai-modal__head .muted {
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.ai-modal__close {
+  border: none;
+  background: none;
+  font-size: 18px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ai-modal__close:hover {
+  color: var(--text);
+}
+.ai-modal__loading {
+  padding: 0 22px 4px;
+  font-size: 12.5px;
+}
+.ai-modal :deep(.ai-panel) {
+  padding: 4px 22px 0;
+}
+
 @media (max-width: 900px) {
   .help-grid {
     grid-template-columns: 1fr;
@@ -580,6 +767,19 @@ onMounted(async () => {
   }
   .help-feedback {
     grid-template-columns: 1fr;
+  }
+  .help-ai {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .help-tabs {
+    flex-wrap: wrap;
+  }
+  .help-tabs button.help-tabs__ai {
+    margin-left: 0;
+  }
+  .ai-modal {
+    max-height: 94vh;
   }
 }
 </style>

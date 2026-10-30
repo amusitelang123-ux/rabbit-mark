@@ -573,3 +573,104 @@ export interface Notice {
   publishAt: string
   createdAt: string
 }
+
+/* ------------------------------ AI 智能客服 ------------------------------ */
+
+/** AI 客服能力配置（公开接口） */
+export interface AiConfig {
+  enabled: boolean
+  mode: 'deepseek' | 'mock'
+  model: string
+  /** 配置了 deepseek 但缺少 Key，自动降级为 mock */
+  usingFallback: boolean
+  welcome: string
+  quickQuestions: string[]
+  disclaimer: string
+}
+
+/** 知识引用：回答里 [1]、[2] 指向的 FAQ / 规则 */
+export interface AiCitation {
+  sourceType: string
+  sourceId: number | null
+  title: string
+  snippet: string
+}
+
+/** AI 客服对话可选的关联订单（帮助中心订单选择器） */
+export interface AiOrderOption {
+  orderNo: string
+  statusText: string
+  payAmount: number
+  itemCount: number
+}
+
+export interface AiUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface AiToolTrace {
+  name: string
+  arguments: string
+  result?: unknown
+}
+
+/** 历史消息（后端 ai_messages） */
+export interface AiChatMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  citations: AiCitation[]
+  toolCalls?: AiToolTrace[]
+  createdAt: string
+}
+
+export interface AiConversationItem {
+  id: number
+  orderNo: string
+  title: string
+  /** 1 进行中 2 已转人工 3 已关闭 */
+  status: number
+  messageCount: number
+  lastMessage: string
+  lastMessageAt: string | null
+  createdAt: string
+}
+
+export interface AiChatPayload {
+  message: string
+  conversationId?: number
+  orderNo?: string
+  /** 仅前端使用，不会序列化到请求体 */
+  signal?: AbortSignal
+}
+
+export interface AiChatDonePayload {
+  conversationId: number
+  messageId: number
+  content: string
+  citations: AiCitation[]
+  usage: AiUsage
+  grounded: boolean
+  mode: 'deepseek' | 'mock'
+}
+
+export interface AiChatResult {
+  conversationId: number
+  messageId: number
+  content: string
+  citations: AiCitation[]
+  usage: AiUsage
+  mode: 'deepseek' | 'mock'
+}
+
+/** 流式回调：与后端 SSE 事件一一对应 */
+export interface AiStreamHandlers {
+  onMeta?: (meta: { conversationId: number }) => void
+  onThinking?: (text: string) => void
+  onDelta?: (text: string) => void
+  onTool?: (tool: { name: string; label: string }) => void
+  onDone?: (payload: AiChatDonePayload) => void
+  onError?: (message: string) => void
+}
