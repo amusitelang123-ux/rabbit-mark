@@ -75,7 +75,7 @@ export interface ApplyRefundInput {
 export async function applyRefund(userId: number, input: ApplyRefundInput) {
   return sequelize.transaction(async (transaction) => {
     const order = await Order.findOne({
-      where: { orderNo: input.orderNo, userId },
+      where: { orderNo: input.orderNo, userId, userDeleted: 0 },
       include: [{ model: OrderItem, as: 'items' }],
       transaction,
     })

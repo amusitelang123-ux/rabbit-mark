@@ -4,6 +4,7 @@ import { Order, OrderItem, Product, ProductComment, User } from '../models'
 import { AppError } from '../utils/errors'
 import { ERR, ORDER_STATUS } from '../constants'
 import { formatDate } from '../utils/serializers'
+import { writeOrderLog } from '../utils/orderLog'
 
 function toClientCommentDto(c: ProductComment & { product?: Product | null }) {
   return {
@@ -79,6 +80,7 @@ export async function createComment(userId: number, input: CreateCommentInput) {
     const order = await Order.findByPk(item.orderId, { transaction })
     if (!order) throw AppError.notFound('订单不存在')
     if (Number(order.userId) !== userId) throw AppError.forbidden('无权评价该订单')
+    if (order.userDeleted) throw AppError.notFound('订单不存在')
     if (order.status !== ORDER_STATUS.FINISHED) {
       throw new AppError('订单完成后才能评价', ERR.ORDER_STATUS_INVALID)
     }
@@ -103,6 +105,13 @@ export async function createComment(userId: number, input: CreateCommentInput) {
     item.isCommented = 1
     await item.save({ transaction })
     await refreshProductCommentStats(Number(item.productId), transaction)
+    await writeOrderLog(
+      Number(order.id),
+      'comment',
+      `user:${userId}`,
+      `评价「${item.productName}」${input.score} 星`,
+      transaction,
+    )
 
     const full = await ProductComment.findByPk(comment.id, {
       include: [{ model: Product, as: 'product' }],
@@ -118,7 +127,12 @@ export async function myComments(userId: number) {
     OrderItem.findAll({
       where: { isCommented: 0 },
       include: [
-        { model: Order, as: 'order', where: { userId, status: ORDER_STATUS.FINISHED }, required: true },
+        {
+          model: Order,
+          as: 'order',
+          where: { userId, status: ORDER_STATUS.FINISHED, userDeleted: 0 },
+          required: true,
+        },
       ],
       order: [['id', 'DESC']],
       limit: 50,

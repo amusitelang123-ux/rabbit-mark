@@ -104,6 +104,20 @@ onMounted(load)
       </div>
     </el-card>
 
+    <el-alert
+      v-if="order && order.status === 20 && order.remindShipCount > 0"
+      type="warning"
+      effect="light"
+      show-icon
+      :closable="false"
+      class="remind-alert"
+    >
+      <template #title>
+        用户已催发货 <b>{{ order.remindShipCount }}</b> 次，最近一次 {{ order.lastRemindShipAt || '—' }}。
+        <el-button v-if="admin.hasPerm('order:ship')" link type="primary" @click="openShip">立即发货</el-button>
+      </template>
+    </el-alert>
+
     <el-row v-if="order" :gutter="16">
       <el-col :md="16">
         <el-card shadow="never" class="block">
@@ -209,6 +223,9 @@ onMounted(load)
 
 <style scoped>
 .head {
+  margin-bottom: 16px;
+}
+.remind-alert {
   margin-bottom: 16px;
 }
 .head :deep(.el-card__body) {

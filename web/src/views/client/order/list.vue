@@ -4,12 +4,16 @@ import { useRouter } from 'vue-router'
 import { orderApi } from '@/api'
 import type { Order } from '@/api/types'
 import { ORDER_STATUS_TEXT, ORDER_TABS } from '@/constants/order'
+import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PriceTag from '@/components/PriceTag.vue'
+import LogisticsDialog from './components/LogisticsDialog.vue'
 import PayDialog from './components/PayDialog.vue'
 
 const router = useRouter()
+const cart = useCartStore()
 const ui = useUiStore()
 
 const orders = ref<Order[]>([])
@@ -18,10 +22,23 @@ const active = ref<number | 'all'>('all')
 const payVisible = ref(false)
 const payOrder = ref<Order | null>(null)
 
+const logisticsVisible = ref(false)
+const logisticsOrderNo = ref('')
+
+const deleteVisible = ref(false)
+const deleteTarget = ref<Order | null>(null)
+const deleting = ref(false)
+
 const tabs = ORDER_TABS
 
 const filtered = computed(() =>
   active.value === 'all' ? orders.value : orders.value.filter((o) => o.status === active.value),
+)
+
+const deleteMessage = computed(() =>
+  deleteTarget.value
+    ? `删除后订单 ${deleteTarget.value.orderNo} 将不再显示在订单列表中，交易记录仍会保留。确定删除吗？`
+    : '',
 )
 
 function statusClass(status: number): string {
@@ -36,29 +53,102 @@ async function load() {
   loading.value = false
 }
 
-function act(order: Order, action: string) {
-  if (action === '去支付') {
-    payOrder.value = order
-    payVisible.value = true
-    return
+type OrderActionKey =
+  | 'pay'
+  | 'detail'
+  | 'cancel'
+  | 'confirm'
+  | 'remind'
+  | 'logistics'
+  | 'rebuy'
+  | 'delete'
+  | 'comment'
+
+interface OrderAction {
+  key: OrderActionKey
+  label: string
+  primary?: boolean
+  danger?: boolean
+}
+
+function hasPendingComment(order: Order): boolean {
+  return order.status === 40 && order.items.some((it) => !it.isCommented)
+}
+
+function actionsFor(order: Order): OrderAction[] {
+  switch (order.status) {
+    case 10:
+      return [
+        { key: 'cancel', label: '取消订单' },
+        { key: 'pay', label: '去支付', primary: true },
+        { key: 'detail', label: '查看详情' },
+      ]
+    case 20:
+      return [
+        { key: 'remind', label: '提醒发货' },
+        { key: 'detail', label: '查看详情' },
+      ]
+    case 30:
+      return [
+        { key: 'logistics', label: '查看物流' },
+        { key: 'confirm', label: '确认收货', primary: true },
+        { key: 'detail', label: '查看详情' },
+      ]
+    case 40: {
+      const list: OrderAction[] = []
+      if (hasPendingComment(order)) list.push({ key: 'comment', label: '评价晒单', primary: true })
+      if (order.logistics) list.push({ key: 'logistics', label: '查看物流' })
+      list.push({ key: 'rebuy', label: '再次购买' })
+      list.push({ key: 'detail', label: '查看详情' })
+      list.push({ key: 'delete', label: '删除订单', danger: true })
+      return list
+    }
+    case 50: {
+      const list: OrderAction[] = []
+      if (order.logistics) list.push({ key: 'logistics', label: '查看物流' })
+      list.push({ key: 'detail', label: '查看详情' })
+      return list
+    }
+    default:
+      return [
+        { key: 'rebuy', label: '再次购买' },
+        { key: 'detail', label: '查看详情' },
+        { key: 'delete', label: '删除订单', danger: true },
+      ]
   }
-  if (action === '查看详情') {
-    router.push(`/order/${order.orderNo}`)
-    return
+}
+
+function act(order: Order, action: OrderAction) {
+  switch (action.key) {
+    case 'pay':
+      payOrder.value = order
+      payVisible.value = true
+      break
+    case 'detail':
+      router.push(`/order/${order.orderNo}`)
+      break
+    case 'cancel':
+      void runOrderOp(() => orderApi.cancel(order.orderNo), '订单已取消')
+      break
+    case 'confirm':
+      void runOrderOp(() => orderApi.confirm(order.orderNo), '已确认收货')
+      break
+    case 'remind':
+      void remindShip(order)
+      break
+    case 'logistics':
+      openLogistics(order.orderNo)
+      break
+    case 'rebuy':
+      void rebuy(order)
+      break
+    case 'delete':
+      askDelete(order)
+      break
+    case 'comment':
+      router.push({ path: `/order/${order.orderNo}`, query: { comment: '1' } })
+      break
   }
-  if (action === '取消订单') {
-    void runOrderOp(() => orderApi.cancel(order.orderNo), '订单已取消')
-    return
-  }
-  if (action === '确认收货') {
-    void runOrderOp(() => orderApi.confirm(order.orderNo), '已确认收货')
-    return
-  }
-  if (action === '提醒发货') {
-    ui.toast('已提醒商家尽快发货', 'success')
-    return
-  }
-  ui.toast(`${action}（演示）`, 'info')
 }
 
 async function runOrderOp(op: () => Promise<unknown>, successMsg: string) {
@@ -71,23 +161,63 @@ async function runOrderOp(op: () => Promise<unknown>, successMsg: string) {
   }
 }
 
-function onPaid() {
-  load()
+async function remindShip(order: Order) {
+  try {
+    const result = await orderApi.remindShip(order.orderNo)
+    if (result.reminded) {
+      ui.toast('已提醒商家尽快发货', 'success')
+    } else {
+      ui.toast(`已提醒过啦，请在 ${result.nextRemindAt ?? '稍后'} 后再试`, 'info')
+    }
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '提醒失败', 'error')
+  }
 }
 
-function actionsFor(status: number): string[] {
-  switch (status) {
-    case 10:
-      return ['取消订单', '去支付', '查看详情']
-    case 20:
-      return ['提醒发货', '查看详情']
-    case 30:
-      return ['查看物流', '确认收货', '查看详情']
-    case 40:
-      return ['评价晒单', '再次购买', '查看详情']
-    default:
-      return ['再次购买', '删除订单']
+async function rebuy(order: Order) {
+  try {
+    const result = await orderApi.rebuy(order.orderNo)
+    // 先刷新购物车 Store，再跳转，避免购物车页面拿到旧数据
+    await cart.load().catch(() => undefined)
+    const skippedText = result.skippedCount ? `，${result.skippedCount} 件商品失效未加入` : ''
+    ui.toast(
+      `已加入购物车 ${result.addedCount} 件商品${skippedText}`,
+      result.skippedCount ? 'info' : 'success',
+    )
+    router.push('/cart')
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '再次购买失败', 'error')
   }
+}
+
+function openLogistics(orderNo: string) {
+  logisticsOrderNo.value = orderNo
+  logisticsVisible.value = true
+}
+
+function askDelete(order: Order) {
+  deleteTarget.value = order
+  deleteVisible.value = true
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value) return
+  deleting.value = true
+  try {
+    await orderApi.remove(deleteTarget.value.orderNo)
+    ui.toast('订单已删除', 'success')
+    deleteVisible.value = false
+    deleteTarget.value = null
+    await load()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '删除失败', 'error')
+  } finally {
+    deleting.value = false
+  }
+}
+
+function onPaid() {
+  load()
 }
 
 onMounted(load)
@@ -143,13 +273,13 @@ onMounted(load)
 
               <div class="order__actions">
                 <button
-                  v-for="a in actionsFor(o.status)"
-                  :key="a"
+                  v-for="a in actionsFor(o)"
+                  :key="a.key"
                   class="btn btn-sm"
-                  :class="a === '去支付' ? 'btn-primary' : 'btn-secondary'"
+                  :class="[a.primary ? 'btn-primary' : 'btn-secondary', { 'is-danger': a.danger }]"
                   @click="act(o, a)"
                 >
-                  {{ a }}
+                  {{ a.label }}
                 </button>
               </div>
             </div>
@@ -166,6 +296,18 @@ onMounted(load)
         :order-no="payOrder?.orderNo ?? ''"
         :amount="payOrder?.payAmount ?? 0"
         @paid="onPaid"
+      />
+
+      <LogisticsDialog v-model="logisticsVisible" :order-no="logisticsOrderNo" />
+
+      <ConfirmDialog
+        v-model="deleteVisible"
+        title="删除订单"
+        :message="deleteMessage"
+        confirm-text="删除订单"
+        danger
+        :loading="deleting"
+        @confirm="confirmDelete"
       />
     </div>
   </div>
@@ -287,6 +429,13 @@ onMounted(load)
 }
 .order__actions .btn {
   border-radius: 100px;
+}
+.order__actions .btn.is-danger {
+  color: #c0392b;
+  border-color: #e6b0aa;
+}
+.order__actions .btn.is-danger:hover:not(:disabled) {
+  background: #fdf2f1;
 }
 
 @media (max-width: 900px) {

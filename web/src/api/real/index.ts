@@ -1,5 +1,5 @@
 import { http } from '../request'
-import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, UserInfo, Notice } from '../types'
+import type { Brand, Category, CommentItem, Coupon, CouponPreviewResult, DeleteOrderResult, MyComment, MyComments, MyPoints, ActivePromotion, FaqGroup, LogisticsCompanyItem, ActiveSeckill, FeedbackItem, PublicConfig, Order, OrderLogisticsDetail, PageResult, PayStatusResult, PrepayResult, Product, Address, CartItem, Refund, RebuyResult, RemindShipResult, UserInfo, Notice } from '../types'
 import type {
   AddressPayload,
   CartAddPayload,
@@ -73,6 +73,10 @@ export const realApi: ClientApi = {
     create: (payload: CreateOrderPayload = {}) => http.post<Order>('/orders', payload),
     cancel: (orderNo) => http.put<Order>(`/orders/${orderNo}/cancel`),
     confirm: (orderNo) => http.put<Order>(`/orders/${orderNo}/confirm`),
+    rebuy: (orderNo) => http.post<RebuyResult>(`/orders/${orderNo}/rebuy`),
+    remove: (orderNo) => http.delete<DeleteOrderResult>(`/orders/${orderNo}`),
+    remindShip: (orderNo) => http.post<RemindShipResult>(`/orders/${orderNo}/remind-ship`),
+    logistics: (orderNo) => http.get<OrderLogisticsDetail>(`/orders/${orderNo}/logistics`),
   },
 
   addressApi: {
@@ -126,6 +130,7 @@ export const realApi: ClientApi = {
   commentApi: {
     mine: () => http.get<MyComments>('/user/comments'),
     create: (payload) => http.post<MyComment>('/comments', payload),
+    uploadImage: (file) => http.upload<{ url: string }>('/comments/images', file),
   },
 
   pointsApi: {

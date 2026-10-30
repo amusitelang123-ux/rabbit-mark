@@ -57,6 +57,12 @@ export class Order extends Model<InferAttributes<Order>, InferCreationAttributes
   declare receiverAddress: string | null
   declare remark: string | null
   declare adminRemark: string | null
+  /** 用户侧逻辑删除（仅隐藏，不做物理删除） */
+  declare userDeleted: CreationOptional<number>
+  declare userDeletedAt: Date | null
+  /** 用户催发货提醒：次数与最近时间，供后台列表/详情直接展示 */
+  declare remindShipCount: CreationOptional<number>
+  declare lastRemindShipAt: Date | null
   declare source: CreationOptional<number>
   declare createdAt: CreationOptional<Date>
   declare updatedAt: CreationOptional<Date>
@@ -88,6 +94,10 @@ Order.init(
     receiverAddress: { type: DataTypes.STRING(255), allowNull: true },
     remark: { type: DataTypes.STRING(255), allowNull: true },
     adminRemark: { type: DataTypes.STRING(255), allowNull: true },
+    userDeleted: { type: DataTypes.TINYINT, defaultValue: 0 },
+    userDeletedAt: { type: DataTypes.DATE, allowNull: true },
+    remindShipCount: { type: DataTypes.INTEGER, defaultValue: 0 },
+    lastRemindShipAt: { type: DataTypes.DATE, allowNull: true },
     source: { type: DataTypes.TINYINT, defaultValue: 1 },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,

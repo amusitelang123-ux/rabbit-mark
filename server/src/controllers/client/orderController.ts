@@ -34,3 +34,20 @@ export const cancel = asyncHandler(async (req: Request, res: Response) => {
 export const confirm = asyncHandler(async (req: Request, res: Response) => {
   sendOk(res, await orderService.confirmOrder(req.auth!.uid, req.params.orderNo), '已确认收货')
 })
+
+export const rebuy = asyncHandler(async (req: Request, res: Response) => {
+  sendOk(res, await orderService.rebuyOrder(req.auth!.uid, req.params.orderNo), '商品已加入购物车')
+})
+
+export const remindShip = asyncHandler(async (req: Request, res: Response) => {
+  const result = await orderService.remindShip(req.auth!.uid, req.params.orderNo)
+  sendOk(res, result, result.reminded ? '已提醒商家尽快发货' : '已提醒过啦，请耐心等待')
+})
+
+export const logistics = asyncHandler(async (req: Request, res: Response) => {
+  sendOk(res, await orderService.getOrderLogistics(req.auth!.uid, req.params.orderNo))
+})
+
+export const remove = asyncHandler(async (req: Request, res: Response) => {
+  sendOk(res, await orderService.deleteOrder(req.auth!.uid, req.params.orderNo), '订单已删除')
+})

@@ -14,6 +14,10 @@ export const ORDER_ACTION_TEXT: Record<string, string> = {
   refund_approve: '售后审核通过并退款',
   refund_reject: '售后审核拒绝',
   remark: '后台备注',
+  remind_ship: '提醒发货',
+  rebuy: '再次购买',
+  delete: '删除订单',
+  comment: '发表评价',
 }
 
 export type OrderAction = keyof typeof ORDER_ACTION_TEXT

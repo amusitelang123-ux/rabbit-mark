@@ -167,6 +167,10 @@ export interface Order {
   payTime: string | null
   shipTime: string | null
   receiveTime: string | null
+  /** 用户催发货提醒次数（后台订单列表/详情展示） */
+  remindShipCount: number
+  /** 最近一次催发货时间 */
+  lastRemindShipAt: string | null
   remark: string
   createdAt: string
   /** 订单操作日志时间轴（仅详情接口返回） */
@@ -177,6 +181,49 @@ export interface Order {
 export interface LogisticsTrace {
   time: string
   text: string
+}
+
+/** 再次购买时被跳过的明细 */
+export interface RebuySkippedItem {
+  productName: string
+  reason: string
+}
+
+/** 再次购买结果：已加入购物车数量 + 失效明细 */
+export interface RebuyResult {
+  orderNo: string
+  addedCount: number
+  skippedCount: number
+  skipped: RebuySkippedItem[]
+  cartCount: number
+}
+
+/** 删除订单结果（用户侧逻辑隐藏） */
+export interface DeleteOrderResult {
+  orderNo: string
+  deleted: boolean
+}
+
+/** 提醒发货结果；冷却期内重复提醒返回 duplicated=true */
+export interface RemindShipResult {
+  reminded: boolean
+  duplicated: boolean
+  remindCount: number
+  lastRemindAt: string
+  cooldownSeconds: number
+  nextRemindAt: string | null
+}
+
+/** 订单物流详情（未发货时各字段为空） */
+export interface OrderLogisticsDetail {
+  orderNo: string
+  status: OrderStatus
+  statusText: string
+  company: string
+  trackingNo: string
+  shipTime: string | null
+  traces: LogisticsTrace[]
+  hasLogistics: boolean
 }
 
 export interface Coupon {

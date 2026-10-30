@@ -43,6 +43,9 @@ export const avatarUpload = buildUploader('avatars', AVATAR_MAX_SIZE)
 /** 商品图片上传：字段名 file，单文件，最大 5MB */
 export const productUpload = buildUploader('products', 5 * 1024 * 1024)
 
+/** 评价晒单图片上传：字段名 file，单文件，最大 5MB */
+export const commentUpload = buildUploader('comments', 5 * 1024 * 1024)
+
 /** 将上传文件名拼接为可访问 URL */
 export function toUploadUrl(subDir: string, filename: string): string {
   return `${config.upload.baseUrl.replace(/\/$/, '')}/${subDir}/${filename}`

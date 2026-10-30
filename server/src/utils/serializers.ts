@@ -263,6 +263,9 @@ export function toOrderDto(
     payTime: order.payTime ? formatDate(order.payTime) : null,
     shipTime: order.shipTime ? formatDate(order.shipTime) : null,
     receiveTime: order.receiveTime ? formatDate(order.receiveTime) : null,
+    /** 用户催发货提醒，后台订单列表/详情用于醒目标记 */
+    remindShipCount: order.remindShipCount ?? 0,
+    lastRemindShipAt: order.lastRemindShipAt ? formatDate(order.lastRemindShipAt) : null,
     remark: order.remark ?? '',
     createdAt: formatDate(order.createdAt),
     /** 订单操作日志时间轴（仅详情查询返回） */

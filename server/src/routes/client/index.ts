@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { optionalAuth, requireAuth } from '../../middlewares/auth'
-import { avatarUpload } from '../../middlewares/upload'
+import { avatarUpload, commentUpload } from '../../middlewares/upload'
 import * as auth from '../../controllers/client/authController'
 import * as catalog from '../../controllers/client/catalogController'
 import * as user from '../../controllers/client/userController'
@@ -59,8 +59,12 @@ router.delete('/cart', requireAuth, cart.remove)
 router.post('/orders', requireAuth, order.create)
 router.get('/orders', requireAuth, order.list)
 router.get('/orders/:orderNo', requireAuth, order.detail)
+router.get('/orders/:orderNo/logistics', requireAuth, order.logistics)
 router.put('/orders/:orderNo/cancel', requireAuth, order.cancel)
 router.put('/orders/:orderNo/confirm', requireAuth, order.confirm)
+router.post('/orders/:orderNo/rebuy', requireAuth, order.rebuy)
+router.post('/orders/:orderNo/remind-ship', requireAuth, order.remindShip)
+router.delete('/orders/:orderNo', requireAuth, order.remove)
 
 /* 支付 */
 router.post('/payments/prepay', requireAuth, payment.prepay)
@@ -73,6 +77,7 @@ router.get('/refunds', requireAuth, refund.mine)
 
 /* 评价 */
 router.get('/user/comments', requireAuth, comment.mine)
+router.post('/comments/images', requireAuth, commentUpload.single('file'), comment.uploadImage)
 router.post('/comments', requireAuth, comment.create)
 
 /* 积分 */

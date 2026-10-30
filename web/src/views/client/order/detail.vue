@@ -1,21 +1,36 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { orderApi, refundApi } from '@/api'
-import type { Order } from '@/api/types'
+import type { Order, OrderItem } from '@/api/types'
 import { ORDER_STATUS_TEXT } from '@/constants/order'
+import { useCartStore } from '@/stores/cart'
 import { useUiStore } from '@/stores/ui'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PriceTag from '@/components/PriceTag.vue'
+import CommentDialog from './components/CommentDialog.vue'
+import LogisticsDialog from './components/LogisticsDialog.vue'
 import PayDialog from './components/PayDialog.vue'
 import { formatMoney } from '@/utils/money'
 
 const route = useRoute()
+const router = useRouter()
+const cart = useCartStore()
 const ui = useUiStore()
 
 const order = ref<Order | null>(null)
 const loading = ref(true)
 const payVisible = ref(false)
+
+const logisticsVisible = ref(false)
+const logisticsOrderNo = ref('')
+
+const commentVisible = ref(false)
+const commentTarget = ref<OrderItem | null>(null)
+
+const deleteVisible = ref(false)
+const deleting = ref(false)
 
 const steps = [
   { status: 10, label: '提交订单' },
@@ -34,8 +49,17 @@ const stepIndex = computed(() => {
 
 const isClosed = computed(() => order.value && [50, 60, 70].includes(order.value.status))
 
+const hasPendingComment = computed(
+  () => order.value?.status === 40 && order.value.items.some((it) => !it.isCommented),
+)
+
 async function reload() {
-  order.value = (await orderApi.detail(route.params.orderNo as string)) ?? null
+  try {
+    order.value = (await orderApi.detail(route.params.orderNo as string)) ?? null
+  } catch (e) {
+    order.value = null
+    ui.toast(e instanceof Error ? e.message : '订单不存在', 'error')
+  }
 }
 
 function pay() {
@@ -64,8 +88,81 @@ async function confirmOrder() {
   }
 }
 
-function remindShip() {
-  ui.toast('已提醒商家尽快发货', 'success')
+async function remindShip() {
+  if (!order.value) return
+  try {
+    const result = await orderApi.remindShip(order.value.orderNo)
+    if (result.reminded) {
+      ui.toast('已提醒商家尽快发货', 'success')
+    } else {
+      ui.toast(`已提醒过啦，请在 ${result.nextRemindAt ?? '稍后'} 后再试`, 'info')
+    }
+    await reload()
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '提醒失败', 'error')
+  }
+}
+
+async function rebuy() {
+  if (!order.value) return
+  try {
+    const result = await orderApi.rebuy(order.value.orderNo)
+    // 先刷新购物车 Store，再跳转，避免购物车页面拿到旧数据
+    await cart.load().catch(() => undefined)
+    const skippedText = result.skippedCount ? `，${result.skippedCount} 件商品失效未加入` : ''
+    ui.toast(
+      `已加入购物车 ${result.addedCount} 件商品${skippedText}`,
+      result.skippedCount ? 'info' : 'success',
+    )
+    router.push('/cart')
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '再次购买失败', 'error')
+  }
+}
+
+function openLogistics() {
+  if (!order.value) return
+  logisticsOrderNo.value = order.value.orderNo
+  logisticsVisible.value = true
+}
+
+function openComment(item: OrderItem) {
+  commentTarget.value = item
+  commentVisible.value = true
+}
+
+function openFirstComment() {
+  if (!order.value) return
+  const item = order.value.items.find((it) => !it.isCommented)
+  if (!item) {
+    ui.toast('该订单商品已全部评价', 'info')
+    return
+  }
+  openComment(item)
+}
+
+async function onCommentSubmitted() {
+  await reload()
+}
+
+function askDelete() {
+  if (!order.value) return
+  deleteVisible.value = true
+}
+
+async function confirmDelete() {
+  if (!order.value) return
+  deleting.value = true
+  try {
+    await orderApi.remove(order.value.orderNo)
+    ui.toast('订单已删除', 'success')
+    deleteVisible.value = false
+    await router.replace('/orders')
+  } catch (e) {
+    ui.toast(e instanceof Error ? e.message : '删除失败', 'error')
+  } finally {
+    deleting.value = false
+  }
 }
 
 const refundVisible = ref(false)
@@ -106,6 +203,14 @@ async function submitRefund() {
 onMounted(async () => {
   await reload()
   loading.value = false
+  if (route.query.comment === '1' && order.value) {
+    if (order.value.status === 40) {
+      openFirstComment()
+    } else {
+      ui.toast('订单完成后才能评价', 'info')
+    }
+    await router.replace({ path: route.path, query: {} })
+  }
 })
 </script>
 
@@ -129,9 +234,36 @@ onMounted(async () => {
               <button class="btn btn-secondary btn-sm" @click="cancelOrder">取消订单</button>
               <button class="btn btn-primary btn-sm" @click="pay">去支付</button>
             </template>
-            <button v-else-if="order.status === 20" class="btn btn-secondary btn-sm" @click="remindShip">提醒发货</button>
-            <button v-else-if="order.status === 30" class="btn btn-primary btn-sm" @click="confirmOrder">确认收货</button>
-            <button v-else class="btn btn-primary btn-sm" @click="ui.toast('再次购买（演示）', 'info')">再次购买</button>
+
+            <template v-else-if="order.status === 20">
+              <button class="btn btn-secondary btn-sm" @click="remindShip">提醒发货</button>
+            </template>
+
+            <template v-else-if="order.status === 30">
+              <button class="btn btn-secondary btn-sm" @click="openLogistics">查看物流</button>
+              <button class="btn btn-primary btn-sm" @click="confirmOrder">确认收货</button>
+            </template>
+
+            <template v-else-if="order.status === 40">
+              <button v-if="hasPendingComment" class="btn btn-primary btn-sm" @click="openFirstComment">
+                评价晒单
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="openLogistics">查看物流</button>
+              <button class="btn btn-secondary btn-sm" @click="rebuy">再次购买</button>
+              <button class="btn btn-secondary btn-sm is-danger" @click="askDelete">删除订单</button>
+            </template>
+
+            <template v-else-if="order.status === 50">
+              <button v-if="order.logistics" class="btn btn-secondary btn-sm" @click="openLogistics">
+                查看物流
+              </button>
+            </template>
+
+            <template v-else>
+              <button class="btn btn-secondary btn-sm" @click="rebuy">再次购买</button>
+              <button class="btn btn-secondary btn-sm is-danger" @click="askDelete">删除订单</button>
+            </template>
+
             <button v-if="canRefund" class="btn btn-secondary btn-sm" @click="openRefund">申请售后</button>
             <button class="btn btn-secondary btn-sm" @click="ui.toast('联系客服（演示）', 'info')">联系客服</button>
           </div>
@@ -168,6 +300,14 @@ onMounted(async () => {
                       <span v-if="it.seckill" class="od-seckill-tag">秒杀</span>
                       {{ it.skuSpecText }}
                     </p>
+                    <button
+                      v-if="order.status === 40 && !it.isCommented"
+                      class="od-items__comment"
+                      @click="openComment(it)"
+                    >
+                      评价晒单
+                    </button>
+                    <span v-else-if="order.status === 40" class="od-items__commented muted">已评价</span>
                   </div>
                   <span class="od-items__price">¥{{ formatMoney(it.price) }} × {{ it.quantity }}</span>
                   <b class="od-items__subtotal">¥{{ formatMoney(it.subtotal) }}</b>
@@ -231,6 +371,27 @@ onMounted(async () => {
 
         <PayDialog v-model="payVisible" :order-no="order.orderNo" :amount="order.payAmount" @paid="reload" />
 
+        <CommentDialog
+          v-model="commentVisible"
+          :order-item-id="commentTarget?.id ?? 0"
+          :product-name="commentTarget?.productName ?? ''"
+          :product-image="commentTarget?.productImage ?? ''"
+          :order-no="order.orderNo"
+          @submitted="onCommentSubmitted"
+        />
+
+        <LogisticsDialog v-model="logisticsVisible" :order-no="logisticsOrderNo" />
+
+        <ConfirmDialog
+          v-model="deleteVisible"
+          title="删除订单"
+          :message="`删除后订单 ${order.orderNo} 将不再显示在订单列表中，交易记录仍会保留。确定删除吗？`"
+          confirm-text="删除订单"
+          danger
+          :loading="deleting"
+          @confirm="confirmDelete"
+        />
+
         <div v-if="refundVisible" class="rf-mask" @click.self="refundVisible = false">
           <div class="rf-modal card">
             <h2 class="rf-title">申请售后</h2>
@@ -287,6 +448,15 @@ onMounted(async () => {
 .od-head__actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.od-head__actions .is-danger {
+  color: #c0392b;
+  border-color: #e6b0aa;
+}
+.od-head__actions .is-danger:hover:not(:disabled) {
+  background: #fdf2f1;
 }
 
 .od-steps {
@@ -404,6 +574,26 @@ onMounted(async () => {
 .od-items__subtotal {
   color: var(--amz-price);
   text-align: right;
+}
+.od-items__comment {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--amz-link-hover);
+  border-radius: 100px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.od-items__comment:hover {
+  border-color: var(--amz-orange);
+  color: var(--amz-price);
+  background: #fff8ec;
+}
+.od-items__commented {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
 }
 
 .od-logi {
